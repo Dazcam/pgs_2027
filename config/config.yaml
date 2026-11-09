@@ -1,0 +1,45 @@
+#--------------------------------------------------------------------------------------
+#
+#    pgs_2027 | config
+#
+#--------------------------------------------------------------------------------------
+
+##  Shared settings  ---------------------------------------------------------------------
+
+containers:
+  prs: ../resources/containers/prs-bigsnpr.sif
+
+# GWAS summary statistics
+#   Public files are downloaded in 00SETUP from url and saved as file.
+#   Collaborator files (url: null) are copied into ../resources/gwas/ by hand.
+gwas:
+  adhd2022:
+    url: https://figshare.com/ndownloader/files/40036684
+    file: ADHD2022_iPSYCH_deCODE_PGC.meta.gz
+  anx2024:
+    url: null
+    file: null
+  asd2019:
+    url: null
+    file: null
+  bip2024:
+    url: https://figshare.com/ndownloader/files/49760772
+    file: bip2024_eur_no23andMe.gz
+  mdd2025:
+    url: https://figshare.com/ndownloader/files/51487022
+    file: pgc-mdd2025_no23andMe-noUKBB_eur_v3-49-24-11.tsv.gz
+  scz2022:
+    url: https://figshare.com/ndownloader/files/34517828
+    file: PGC3_SCZ_wave3.european.autosome.public.v3.vcf.tsv.gz
+  anx2024_adj_adhd2022:
+    url: null
+    file: anx2024_adj_adhd2022.fastGWA
+  mdd2025_adj_adhd2022:
+    url: null
+    file: mdd2025_adj_adhd2022.fastGWA
+  cortical_expansion:
+    url: null
+    file: cortical_expansion.fastGWA
+
+#--------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------
