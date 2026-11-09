@@ -1,9 +1,13 @@
 configfile: '../config/config.yaml'
 
-#include: 'rules/00setup.smk'
+include: 'rules/00setup.smk'
 #include: 'rules/01genotypes.smk'
 #include: 'rules/02prep_gwas.smk'
 #include: 'rules/03prs.smk'
 
 rule all:
-    input: []
+    input:
+        config["setup"]["get_containers"]["output"],
+        config["setup"]["get_prscs"]["output"],
+        config["setup"]["get_prscs_ref"]["output"],
+        expand(config["setup"]["get_gwas_sumstats"]["output"], gwas = GWAS_DOWNLOAD)
