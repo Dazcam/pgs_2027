@@ -45,7 +45,7 @@ rule vcf_to_plink:
     input:   rules.subset_vcf.output
     output:  GENO["vcf_to_plink"]["output"]
     params:  prefix = GENO["vcf_to_plink"]["prefix"]
-    singularity: config["containers"]["prs"]
+    envmodules: 'PLINK'
     resources: time = "01:00:00"
     message: "Convert the European-subset VCF to PLINK format"
     benchmark: GENO["vcf_to_plink"]["benchmark"]
@@ -66,7 +66,7 @@ rule ld_prune:
              maf            = GENO["ld_prune"]["maf"],
              indep_pairwise = GENO["ld_prune"]["indep_pairwise"],
              prefix         = GENO["ld_prune"]["prefix"]
-    singularity: config["containers"]["prs"]
+    envmodules: 'PLINK'
     resources: time = "01:00:00"
     message: "LD prune common SNPs before the genotype PCA"
     benchmark: GENO["ld_prune"]["benchmark"]
@@ -86,7 +86,7 @@ rule genotype_pcs:
     params:  bfile  = GENO["vcf_to_plink"]["prefix"],
              pcs    = GENO["genotype_pcs"]["pcs"],
              prefix = GENO["genotype_pcs"]["prefix"]
-    singularity: config["containers"]["prs"]
+    envmodules: 'PLINK'
     resources: time = "01:00:00"
     message: "Genotype PCA on LD-pruned SNPs in European-ancestry samples"
     benchmark: GENO["genotype_pcs"]["benchmark"]

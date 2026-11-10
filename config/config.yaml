@@ -10,10 +10,25 @@ containers:
   prs: ../resources/containers/prs.sif
 
 # GWAS summary statistics, stored as ../resources/gwas/<gwas>/<file>
-#   download: true   fetched from url in 00SETUP
-#   download: false  copied in by hand (collaborator files have no url)
-#   token: true      send the Figshare API token (figshare blocks downloads without it)
-#   md5 is optional; quote it so YAML keeps it as a string.
+#   Source (00SETUP)
+#     download: true    fetched from url
+#     download: false   copied in by hand (collaborator files have no url)
+#     token: true       send the Figshare API token (figshare blocks downloads without it)
+#     md5               optional; quote it so YAML keeps it as a string
+#   Format (02PREP-GWAS)
+#     delim             tab | space
+#     cols              raw column names for snp, a1 (effect allele), a2, effect, se, p,
+#                       freq (allele frequency, used by n: auto) and info (null if absent)
+#     effect_type       beta | or (or is converted to log(OR))
+#     trait_type        binary | continuous (sets the n: auto formula; GenomicSEM factors
+#                       are continuous)
+#     qc_cols           columns that must equal 0 to keep a SNP (GenomicSEM error/warning)
+#     n                 per-SNP N; n_gwas is their summary (prep_gwas: n_summary)
+#                         column        col x scale
+#                         case_control  4 / (1/cases + 1/controls)
+#                         fixed         value
+#                         auto          Mallard et al.: k / (2f(1-f)SE^2), k = 4 binary,
+#                                       1 continuous, SNPs with MAF in prep_gwas: auto_maf
 gwas:
   adhd2022:
     url: https://api.figshare.com/v2/file/download/40036684
@@ -21,54 +36,108 @@ gwas:
     token: true
     file: ADHD2022_iPSYCH_deCODE_PGC.meta.gz
     md5: "ea57120c720e880e34f67f57483dcbb4"
+    delim: space
+    cols: {snp: SNP, a1: A1, a2: A2, effect: OR, se: SE, p: P, freq: FRQ_U_186843, info: INFO}
+    effect_type: or
+    trait_type: binary
+    qc_cols: []
+    n: {method: case_control, cases: Nca, controls: Nco}
   anx2024:
     url: https://zenodo.org/api/records/13135834/files/ANX_EUR.txt.gz/content
     download: true
     token: false
     file: ANX_EUR.txt.gz
     md5: "ad2528571d852b0e2d254a28a35c8aae"
+    delim: space
+    cols: {snp: SNP, a1: A1, a2: A2, effect: BETA, se: SE, p: P, freq: MAF, info: null}
+    effect_type: beta
+    trait_type: continuous
+    qc_cols: []
+    n: {method: auto}
   asd2019:
     url: https://api.figshare.com/v2/file/download/28169292
     download: true
     token: true
     file: iPSYCH-PGC_ASD_Nov2017
     md5: "5ca46780db3b37038bd02bd20c38c85c"
+    delim: tab
+    cols: {snp: SNP, a1: A1, a2: A2, effect: OR, se: SE, p: P, freq: null, info: INFO}
+    effect_type: or
+    trait_type: binary
+    qc_cols: []
+    n: {method: fixed, value: 44367}   # no N or frequency in file; 18,381 cases, 27,969 controls
   bip2024:
     url: https://api.figshare.com/v2/file/download/49760772
     download: true
     token: true
     file: bip2024_eur_no23andMe.gz
     md5: "ee30cead54d61a015dd71b773d442da0"
+    delim: space
+    cols: {snp: SNP, a1: A1, a2: A2, effect: OR, se: SE, p: P, freq: HRC_FRQ_A1, info: INFO}
+    effect_type: or
+    trait_type: binary
+    qc_cols: []
+    n: {method: column, col: Neff_half, scale: 2}
   mdd2025:
     url: https://api.figshare.com/v2/file/download/51487022
     download: true
     token: true
     file: pgc-mdd2025_no23andMe-noUKBB_eur_v3-49-24-11.tsv.gz
     md5: "29d3ce57cfce19ca28eb1643d9e2e428"
+    delim: tab
+    cols: {snp: ID, a1: EA, a2: NEA, effect: BETA, se: SE, p: PVAL, freq: FCON, info: IMPINFO}
+    effect_type: beta
+    trait_type: binary
+    qc_cols: []
+    n: {method: column, col: NEFF, scale: 1}
   scz2022:
     url: https://api.figshare.com/v2/file/download/34517828
     download: true
     token: true
     file: PGC3_SCZ_wave3.european.autosome.public.v3.vcf.tsv.gz
     md5: "6ebe2376f5cda972d37efa0f214c4df0"
+    delim: tab
+    cols: {snp: ID, a1: A1, a2: A2, effect: BETA, se: SE, p: PVAL, freq: FCON, info: IMPINFO}
+    effect_type: beta
+    trait_type: binary
+    qc_cols: []
+    n: {method: column, col: NEFF, scale: 2}   # NEFF appears to be half the effective N
   anx2024_adj_adhd2022:
     url: null
     download: false
     token: false
     file: anx2024_adj_adhd2022.fastGWA
     md5: "1f20effd5ed28ef9c6944f359748ad58"
+    delim: tab
+    cols: {snp: SNP, a1: A1, a2: A2, effect: BETA, se: SE, p: P, freq: AF1, info: null}
+    effect_type: beta
+    trait_type: continuous
+    qc_cols: [error, warning]
+    n: {method: column, col: N, scale: 1}
   mdd2025_adj_adhd2022:
     url: null
     download: false
     token: false
     file: mdd2025_adj_adhd2022.fastGWA
     md5: "f7830a1097b0be0228c7c3500c9aea09"
+    delim: tab
+    cols: {snp: SNP, a1: A1, a2: A2, effect: BETA, se: SE, p: P, freq: AF1, info: null}
+    effect_type: beta
+    trait_type: continuous
+    qc_cols: [error, warning]
+    n: {method: column, col: N, scale: 1}
   cortical_expansion:
     url: null
     download: false
     token: false
     file: cortical_expansion.fastGWA
     md5: "d742cb74b3628522da7154db43c2c3e1"
+    delim: tab
+    cols: {snp: SNP, a1: A1, a2: A2, effect: BETA, se: SE, p: P, freq: AF1, info: null}
+    effect_type: beta
+    trait_type: continuous
+    qc_cols: []
+    n: {method: column, col: N, scale: 1}
 
 ##  00SETUP  --------------------------------------------------------------------------
 
@@ -140,6 +209,24 @@ genotypes:
     output: ../results/01GENOTYPES/pca/pca.eigenvec
     benchmark: reports/benchmarks/01genotypes.genotype_pcs.benchmark.txt
     log: ../results/00LOG/01GENOTYPES/genotype_pcs.log
+
+##  02PREP-GWAS  -----------------------------------------------------------------------
+
+prep_gwas:
+  format_gwas:
+    # QC settings (applied to every GWAS; null switches a filter off)
+    info_min: 0.8            # minimum INFO, where the GWAS has an INFO column
+    drop_ambiguous: true     # drop strand-ambiguous SNPs (A/T, C/G)
+    drop_duplicates: true    # drop SNP IDs that appear more than once
+    n_min_frac: null         # drop SNPs with N < n_min_frac x 90th percentile N (column / case_control only)
+    n_summary: median        # median | mean of per-SNP N, used as PRS-CS n_gwas
+    auto_maf: [0.1, 0.4]     # MAF window for n: auto
+    script: ../scripts/gwas_format.R
+    sumstats: ../results/02PREP-GWAS/{gwas}/{gwas}.prscs.txt
+    n_gwas: ../results/02PREP-GWAS/{gwas}/{gwas}.n_gwas.txt
+    qc: ../results/02PREP-GWAS/{gwas}/{gwas}.qc.tsv
+    benchmark: reports/benchmarks/02prep_gwas.format_gwas_{gwas}.benchmark.txt
+    log: ../results/00LOG/02PREP-GWAS/format_gwas_{gwas}.log
 
 #--------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------

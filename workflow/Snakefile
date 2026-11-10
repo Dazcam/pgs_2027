@@ -2,7 +2,7 @@ configfile: '../config/config.yaml'
 
 include: 'rules/00setup.smk'
 include: 'rules/01genotypes.smk'
-#include: 'rules/02prep_gwas.smk'
+include: 'rules/02prep_gwas.smk'
 #include: 'rules/03prs.smk'
 
 rule all:
@@ -12,4 +12,5 @@ rule all:
         config["setup"]["get_prscs_ref"]["output"],
         expand(config["setup"]["get_gwas_sumstats"]["output"], gwas = GWAS),
         config["genotypes"]["vcf_to_plink"]["output"],
-        config["genotypes"]["genotype_pcs"]["output"]
+        config["genotypes"]["genotype_pcs"]["output"],
+        expand(config["prep_gwas"]["format_gwas"]["sumstats"], gwas = GWAS)
