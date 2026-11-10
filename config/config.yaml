@@ -9,45 +9,64 @@
 containers:
   prs: ../resources/containers/prs.sif
 
-# GWAS summary statistics
-#   Public files are downloaded in 00SETUP from url and saved as file.
+# GWAS summary statistics, stored as ../resources/gwas/<gwas>/<file>
+#   download: true   fetched from url in 00SETUP
+#   download: false  copied in by hand (collaborator files have no url)
+#   token: true      send the Figshare API token (figshare blocks downloads without it)
 #   md5 is optional; quote it so YAML keeps it as a string.
-#   Collaborator files (url: null) are copied by hand to ../resources/gwas/<gwas>/<file>.
 gwas:
   adhd2022:
-    url: https://figshare.com/ndownloader/files/40036684
+    url: https://api.figshare.com/v2/file/download/40036684
+    download: true
+    token: true
     file: ADHD2022_iPSYCH_deCODE_PGC.meta.gz
     md5: null
   anx2024:
-    url: https://zenodo.org/records/13135834/files/ANX_EUR.txt.gz?download=1
+    url: https://zenodo.org/api/records/13135834/files/ANX_EUR.txt.gz/content
+    download: true
+    token: false
     file: ANX_EUR.txt.gz
     md5: "ad2528571d852b0e2d254a28a35c8aae"
   asd2019:
     url: null
+    download: false
+    token: false
     file: null
     md5: null
   bip2024:
-    url: https://figshare.com/ndownloader/files/49760772
+    url: https://api.figshare.com/v2/file/download/49760772
+    download: true
+    token: true
     file: bip2024_eur_no23andMe.gz
     md5: null
   mdd2025:
-    url: https://figshare.com/ndownloader/files/51487022
+    url: https://api.figshare.com/v2/file/download/51487022
+    download: true
+    token: true
     file: pgc-mdd2025_no23andMe-noUKBB_eur_v3-49-24-11.tsv.gz
     md5: null
   scz2022:
-    url: https://figshare.com/ndownloader/files/34517828
+    url: https://api.figshare.com/v2/file/download/34517828
+    download: true
+    token: true
     file: PGC3_SCZ_wave3.european.autosome.public.v3.vcf.tsv.gz
     md5: null
   anx2024_adj_adhd2022:
     url: null
+    download: false
+    token: false
     file: anx2024_adj_adhd2022.fastGWA
     md5: null
   mdd2025_adj_adhd2022:
     url: null
+    download: false
+    token: false
     file: mdd2025_adj_adhd2022.fastGWA
     md5: null
   cortical_expansion:
     url: null
+    download: false
+    token: false
     file: cortical_expansion.fastGWA
     md5: null
 
@@ -78,8 +97,8 @@ setup:
     log: ../results/00LOG/00SETUP/get_prscs_ref.log
   get_gwas_sumstats:
     dir: ../resources/gwas/{gwas}
+    figshare_token: ../config/passwords/figshare_token
     output: ../resources/gwas/{gwas}/.get_gwas_sumstats.done
-    user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
     benchmark: reports/benchmarks/00setup.get_gwas_sumstats_{gwas}.benchmark.txt
     log: ../results/00LOG/00SETUP/get_gwas_sumstats_{gwas}.log
 
