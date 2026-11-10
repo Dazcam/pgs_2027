@@ -20,7 +20,7 @@ gwas:
     download: true
     token: true
     file: ADHD2022_iPSYCH_deCODE_PGC.meta.gz
-    md5: null
+    md5: "ea57120c720e880e34f67f57483dcbb4"
   anx2024:
     url: https://zenodo.org/api/records/13135834/files/ANX_EUR.txt.gz/content
     download: true
@@ -38,37 +38,37 @@ gwas:
     download: true
     token: true
     file: bip2024_eur_no23andMe.gz
-    md5: null
+    md5: "ee30cead54d61a015dd71b773d442da0"
   mdd2025:
     url: https://api.figshare.com/v2/file/download/51487022
     download: true
     token: true
     file: pgc-mdd2025_no23andMe-noUKBB_eur_v3-49-24-11.tsv.gz
-    md5: null
+    md5: "29d3ce57cfce19ca28eb1643d9e2e428"
   scz2022:
     url: https://api.figshare.com/v2/file/download/34517828
     download: true
     token: true
     file: PGC3_SCZ_wave3.european.autosome.public.v3.vcf.tsv.gz
-    md5: null
+    md5: "6ebe2376f5cda972d37efa0f214c4df0"
   anx2024_adj_adhd2022:
     url: null
     download: false
     token: false
     file: anx2024_adj_adhd2022.fastGWA
-    md5: null
+    md5: "1f20effd5ed28ef9c6944f359748ad58"
   mdd2025_adj_adhd2022:
     url: null
     download: false
     token: false
     file: mdd2025_adj_adhd2022.fastGWA
-    md5: null
+    md5: "f7830a1097b0be0228c7c3500c9aea09"
   cortical_expansion:
     url: null
     download: false
     token: false
     file: cortical_expansion.fastGWA
-    md5: null
+    md5: "d742cb74b3628522da7154db43c2c3e1"
 
 ##  00SETUP  -----------------------------------------------------------------------------
 
