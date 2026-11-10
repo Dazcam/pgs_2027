@@ -10,4 +10,4 @@ rule all:
         config["setup"]["get_containers"]["output"],
         config["setup"]["get_prscs"]["output"],
         config["setup"]["get_prscs_ref"]["output"],
-        expand(config["setup"]["get_gwas_sumstats"]["output"], gwas = GWAS_DOWNLOAD)
+        expand(config["setup"]["get_gwas_sumstats"]["output"], gwas = GWAS)
