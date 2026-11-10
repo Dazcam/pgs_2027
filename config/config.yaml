@@ -4,7 +4,7 @@
 #
 #--------------------------------------------------------------------------------------
 
-##  Shared settings  ---------------------------------------------------------------------
+##  Shared settings  ------------------------------------------------------------------
 
 containers:
   prs: ../resources/containers/prs.sif
@@ -28,11 +28,11 @@ gwas:
     file: ANX_EUR.txt.gz
     md5: "ad2528571d852b0e2d254a28a35c8aae"
   asd2019:
-    url: null
-    download: false
-    token: false
-    file: null
-    md5: null
+    url: https://api.figshare.com/v2/file/download/28169292
+    download: true
+    token: true
+    file: iPSYCH-PGC_ASD_Nov2017
+    md5: "5ca46780db3b37038bd02bd20c38c85c"
   bip2024:
     url: https://api.figshare.com/v2/file/download/49760772
     download: true
@@ -70,7 +70,7 @@ gwas:
     file: cortical_expansion.fastGWA
     md5: "d742cb74b3628522da7154db43c2c3e1"
 
-##  00SETUP  -----------------------------------------------------------------------------
+##  00SETUP  --------------------------------------------------------------------------
 
 setup:
   get_containers:
@@ -101,6 +101,45 @@ setup:
     output: ../resources/gwas/{gwas}/.get_gwas_sumstats.done
     benchmark: reports/benchmarks/00setup.get_gwas_sumstats_{gwas}.benchmark.txt
     log: ../results/00LOG/00SETUP/get_gwas_sumstats_{gwas}.log
+
+##  01GENOTYPES  ----------------------------------------------------------------------
+
+genotypes:
+  # Final eQTL atlas genotypes (134 QC'd samples), copied in by hand
+  vcf: ../resources/genotypes/eqtl_atlas_genotypes.vcf.gz
+  vcf_md5: "6e6b663b7d386e00078567ac78440178"
+  sample_sheet: ../resources/sheets/eQTL_study_2025_sample_anns.xlsx
+  euro_samples:
+    sheet: Sheet1
+    id_col: sample ID
+    ancestry_col: ancestry
+    ancestry: European
+    script: ../scripts/geno_euro_samples.R
+    output: ../results/01GENOTYPES/euro_samples.txt
+    benchmark: reports/benchmarks/01genotypes.euro_samples.benchmark.txt
+    log: ../results/00LOG/01GENOTYPES/euro_samples.log
+  subset_vcf:
+    output: ../results/01GENOTYPES/eqtl_atlas_genotypes.euro.vcf.gz
+    benchmark: reports/benchmarks/01genotypes.subset_vcf.benchmark.txt
+    log: ../results/00LOG/01GENOTYPES/subset_vcf.log
+  vcf_to_plink:
+    prefix: ../results/01GENOTYPES/eqtl_atlas_genotypes.euro
+    output: ../results/01GENOTYPES/eqtl_atlas_genotypes.euro.bed
+    benchmark: reports/benchmarks/01genotypes.vcf_to_plink.benchmark.txt
+    log: ../results/00LOG/01GENOTYPES/vcf_to_plink.log
+  ld_prune:
+    maf: 0.01
+    indep_pairwise: 250 5 0.2
+    prefix: ../results/01GENOTYPES/pca/ld_prune
+    output: ../results/01GENOTYPES/pca/ld_prune.prune.in
+    benchmark: reports/benchmarks/01genotypes.ld_prune.benchmark.txt
+    log: ../results/00LOG/01GENOTYPES/ld_prune.log
+  genotype_pcs:
+    pcs: 10
+    prefix: ../results/01GENOTYPES/pca/pca
+    output: ../results/01GENOTYPES/pca/pca.eigenvec
+    benchmark: reports/benchmarks/01genotypes.genotype_pcs.benchmark.txt
+    log: ../results/00LOG/01GENOTYPES/genotype_pcs.log
 
 #--------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------
