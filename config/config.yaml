@@ -210,7 +210,7 @@ genotypes:
     benchmark: reports/benchmarks/01genotypes.genotype_pcs.benchmark.txt
     log: ../results/00LOG/01GENOTYPES/genotype_pcs.log
 
-##  02PREP-GWAS  -----------------------------------------------------------------------
+##  02PREP-GWAS  ----------------------------------------------------------------------
 
 prep_gwas:
   format_gwas:
@@ -227,6 +227,47 @@ prep_gwas:
     qc: ../results/02PREP-GWAS/{gwas}/{gwas}.qc.tsv
     benchmark: reports/benchmarks/02prep_gwas.format_gwas_{gwas}.benchmark.txt
     log: ../results/00LOG/02PREP-GWAS/format_gwas_{gwas}.log
+
+##  03PRS  ----------------------------------------------------------------------------
+
+# {tag} in a path is filled from the PRS-CS settings, as PRS-CS names its own output:
+# a<a>_b<b>_phi<phi> (e.g. a1_b0.5_phi1e-02, or a1_b0.5_phiauto when phi is null)
+prs:
+  vcf_to_pgen:
+    prefix: ../results/03PRS/genotypes/eqtl_atlas_genotypes.euro.dosage
+    output: ../results/03PRS/genotypes/eqtl_atlas_genotypes.euro.dosage.pgen
+    benchmark: reports/benchmarks/03prs.vcf_to_pgen.benchmark.txt
+    log: ../results/00LOG/03PRS/vcf_to_pgen.log
+  run_prscs:
+    a: 1
+    b: 0.5
+    phi: 1.0e-2              # null = PRS-CS-auto
+    n_iter: 1000
+    n_burnin: 500
+    thin: 5
+    seed: 1
+    env: ../envs/prscs.yaml
+    out_prefix: ../results/03PRS/prscs/{gwas}/{gwas}
+    output: ../results/03PRS/prscs/{gwas}/{gwas}_pst_eff_{tag}_chr{chr}.txt
+    benchmark: reports/benchmarks/03prs.run_prscs_{gwas}_{tag}_chr{chr}.benchmark.txt
+    log: ../results/00LOG/03PRS/run_prscs_{gwas}_{tag}_chr{chr}.log
+  combine_weights:
+    output: ../results/03PRS/weights/{gwas}_{tag}.weights.txt
+    benchmark: reports/benchmarks/03prs.combine_weights_{gwas}_{tag}.benchmark.txt
+    log: ../results/00LOG/03PRS/combine_weights_{gwas}_{tag}.log
+  score:
+    prefix: ../results/03PRS/scores/{gwas}_{tag}
+    output: ../results/03PRS/scores/{gwas}_{tag}.sscore
+    benchmark: reports/benchmarks/03prs.score_{gwas}_{tag}.benchmark.txt
+    log: ../results/00LOG/03PRS/score_{gwas}_{tag}.log
+  combine_scores:
+    sex_col: sex
+    pcw_col: PCW
+    script: ../scripts/prs_combine_scores.R
+    scores: ../results/03PRS/pgs_scores_{tag}.tsv
+    summary: ../results/03PRS/pgs_summary_{tag}.tsv
+    benchmark: reports/benchmarks/03prs.combine_scores_{tag}.benchmark.txt
+    log: ../results/00LOG/03PRS/combine_scores_{tag}.log
 
 #--------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------

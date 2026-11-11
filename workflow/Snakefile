@@ -3,7 +3,7 @@ configfile: '../config/config.yaml'
 include: 'rules/00setup.smk'
 include: 'rules/01genotypes.smk'
 include: 'rules/02prep_gwas.smk'
-#include: 'rules/03prs.smk'
+include: 'rules/03prs.smk'
 
 rule all:
     input:
@@ -13,4 +13,5 @@ rule all:
         expand(config["setup"]["get_gwas_sumstats"]["output"], gwas = GWAS),
         config["genotypes"]["vcf_to_plink"]["output"],
         config["genotypes"]["genotype_pcs"]["output"],
-        expand(config["prep_gwas"]["format_gwas"]["sumstats"], gwas = GWAS)
+        expand(config["prep_gwas"]["format_gwas"]["sumstats"], gwas = GWAS),
+        prs_path("combine_scores", "scores")

@@ -11,8 +11,8 @@
 # Purpose:   - Read the columns set in the GWAS block of the config
 #            - Standardise to SNP, A1 (effect allele), A2, BETA (log(OR) for OR), SE
 #            - Per-SNP N by the configured method
-#            - QC: valid values, GenomicSEM error/warning, INFO, strand-ambiguous SNPs,
-#              duplicate IDs, optional low-N filter
+#            - QC: valid values, biallelic SNVs, GenomicSEM error/warning, INFO,
+#              strand-ambiguous SNPs, duplicate IDs, optional low-N filter
 #            - Single N for PRS-CS (median or mean of per-SNP N after QC)
 #
 # Inputs:    raw_gwas  GWAS file from ../resources/gwas/<gwas>/

@@ -15,6 +15,26 @@ test_that("tab and space files read only the requested columns, as text", {
   expect_equal(t2$OR, "0.99631")
 })
 
+test_that("leading ## metadata lines are skipped and #CHROM is kept as a column name", {
+  f <- tempfile(fileext = ".tsv.gz")
+  con <- gzfile(f, "w")
+  writeLines(c("##fileFormat=PGCsumstatsVCFv1.0", "##fileDate=\"2025-01-05\"",
+               "#CHROM\tID\tEA\tBETA", "1\trs1\tA\t0.10", "2\trs2\tC\t-0.20"), con)
+  close(con)
+
+  expect_equal(gwas_meta_lines(f), 2)
+  df <- gwas_read(f, "tab", c("#CHROM", "ID", "BETA"))
+  expect_equal(df$ID, c("rs1", "rs2"))
+  expect_equal(df$`#CHROM`, c("1", "2"))
+})
+
+test_that("files without ## lines skip nothing", {
+  f <- tempfile(fileext = ".txt")
+  writeLines(c("SNP A1 OR", "rs1 A 1.1"), f)
+  expect_equal(gwas_meta_lines(f), 0)
+  expect_equal(gwas_read(f, "space", c("SNP", "OR"))$OR, "1.1")
+})
+
 test_that("unknown delimiter stops", {
   expect_error(gwas_read("x", "comma", "a"), "delim")
 })

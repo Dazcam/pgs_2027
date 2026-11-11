@@ -1,8 +1,9 @@
 name: prscs
 channels:
   - conda-forge
-  - defaults
 dependencies:
-  - python=3.9
-  - scipy
-  - h5py
+  # Versions recommended in the PRS-CS README (tested with NumPy 1.x)
+  - python=3.11
+  - numpy=1.26
+  - scipy=1.11
+  - h5py=3.10

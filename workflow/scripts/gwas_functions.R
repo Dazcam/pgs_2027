@@ -4,8 +4,10 @@
 #
 #--------------------------------------------------------------------------------------
 #
-# Functions: gwas_read()          read only the columns needed from a raw GWAS file
+# Functions: gwas_meta_lines()    count leading ## metadata lines (e.g. PGC VCF-style files)
+#            gwas_read()          read only the columns needed from a raw GWAS file
 #            gwas_to_beta()       effect column to BETA (log for OR)
+#            gwas_is_snv()        flag biallelic single-base SNVs (A/C/G/T, alleles differ)
 #            gwas_is_ambiguous()  flag strand-ambiguous SNPs (A/T, C/G)
 #            gwas_snp_n()         per-SNP N by method (column, case_control, fixed, auto)
 #            gwas_qc()            sequential QC with SNP counts per step
@@ -17,21 +19,32 @@
 #
 #--------------------------------------------------------------------------------------
 
+gwas_meta_lines <- function(path, n_check = 1000) {
+
+  # Number of lines at the top of the file that start with ##
+  head_lines <- readr::read_lines(path, n_max = n_check, progress = FALSE)
+  not_meta   <- which(!startsWith(head_lines, "##"))
+  if (length(not_meta) == 0) stop("No header line found in the first ", n_check, " lines of ", path)
+  not_meta[1] - 1
+}
+
 gwas_read <- function(path, delim, cols) {
 
   # cols: character vector of raw column names to keep
+  # Leading ## metadata lines are skipped; a single # (e.g. #CHROM) stays in the header
   # All columns are read as text; the caller converts numeric fields
+  if (!delim %in% c("tab", "space")) stop("delim must be 'tab' or 'space', not '", delim, "'")
+
   col_spec <- readr::cols(.default = readr::col_character())
+  skip     <- gwas_meta_lines(path)
 
   if (delim == "tab") {
     df <- readr::read_tsv(path, col_types = col_spec, col_select = dplyr::all_of(cols),
-                          progress = FALSE)
-  } else if (delim == "space") {
-    # read_table has no col_select in older readr, so read all columns then select
-    df <- readr::read_table(path, col_types = col_spec, progress = FALSE) |>
-      dplyr::select(dplyr::all_of(cols))
+                          skip = skip, progress = FALSE)
   } else {
-    stop("delim must be 'tab' or 'space', not '", delim, "'")
+    # read_table has no col_select in older readr, so read all columns then select
+    df <- readr::read_table(path, col_types = col_spec, skip = skip, progress = FALSE) |>
+      dplyr::select(dplyr::all_of(cols))
   }
 
   df
@@ -42,6 +55,16 @@ gwas_to_beta <- function(effect, effect_type) {
   if (effect_type == "beta") return(effect)
   if (effect_type == "or")   return(log(effect))
   stop("effect_type must be 'beta' or 'or', not '", effect_type, "'")
+}
+
+gwas_is_snv <- function(a1, a2) {
+
+  # PRS-CS reads only SNPs whose alleles are single A, C, G or T; indels and
+  # other allele codes are dropped there, so drop them here to match
+  a1 <- toupper(a1)
+  a2 <- toupper(a2)
+  bases <- c("A", "C", "G", "T")
+  a1 %in% bases & a2 %in% bases & a1 != a2
 }
 
 gwas_is_ambiguous <- function(a1, a2) {
@@ -97,6 +120,9 @@ gwas_qc <- function(df, info_min = NULL, drop_ambiguous = TRUE, drop_duplicates 
     dplyr::filter(!is.na(snp), !is.na(beta), is.finite(beta), !is.na(se), se > 0,
                   !is.na(p), p > 0, p <= 1)
   log_step("valid effect, SE and P", df)
+
+  df <- df[gwas_is_snv(df$a1, df$a2), ]
+  log_step("biallelic SNV (A/C/G/T)", df)
 
   for (col in qc_cols) {
     df <- df[!is.na(df[[col]]) & as.numeric(df[[col]]) == 0, ]

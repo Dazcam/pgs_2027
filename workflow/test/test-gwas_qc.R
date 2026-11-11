@@ -2,31 +2,34 @@
 # - Used in gwas_format.R
 
 toy <- tibble::tibble(
-  snp  = c("rs1", "rs2", "rs3", "rs4", "rs5", "rs6", "rs6", "rs7", "rs8"),
-  a1   = c("A",   "A",   "A",   "A",   "A",   "C",   "C",   "C",   "G"),
-  a2   = c("G",   "G",   "G",   "T",   "C",   "T",   "T",   "T",   "A"),
-  beta = c(0.1,   NA,    0.1,   0.1,   0.1,   0.1,   0.1,   0.1,   0.1),
-  se   = c(0.01,  0.01,  0.01,  0.01,  0.01,  0.01,  0.01,  0.01,  0.01),
-  p    = c(0.5,   0.5,   0.5,   0.5,   0.5,   0.5,   0.5,   0.5,   0.5),
-  info = c(0.9,   0.9,   0.7,   0.9,   0.9,   0.9,   0.9,   0.9,   0.95),
-  n    = c(100,   100,   100,   100,   100,   100,   100,   100,   10),
-  error = c("0",  "0",   "0",   "0",   "0",   "0",   "0",   "1",   "0"))
+  snp  = c("rs1", "rs2", "rs3", "rs4", "rs5", "rs6", "rs6", "rs7", "rs8", "rs9", "rs10"),
+  a1   = c("A",   "A",   "A",   "A",   "A",   "C",   "C",   "C",   "G",   "AT",  "G"),
+  a2   = c("G",   "G",   "G",   "T",   "C",   "T",   "T",   "T",   "A",   "A",   "G"),
+  beta = c(0.1,   NA,    0.1,   0.1,   0.1,   0.1,   0.1,   0.1,   0.1,   0.1,   0.1),
+  se   = c(0.01,  0.01,  0.01,  0.01,  0.01,  0.01,  0.01,  0.01,  0.01,  0.01,  0.01),
+  p    = c(0.5,   0.5,   0.5,   0.5,   0.5,   0.5,   0.5,   0.5,   0.5,   0.5,   0.5),
+  info = c(0.9,   0.9,   0.7,   0.9,   0.9,   0.9,   0.9,   0.9,   0.95,  0.9,   0.9),
+  n    = c(100,   100,   100,   100,   100,   100,   100,   100,   10,    100,   100),
+  error = c("0",  "0",   "0",   "0",   "0",   "0",   "0",   "1",   "0",   "0",   "0"))
 
 run_qc <- function(...) {
   suppressMessages(gwas_qc(toy, ...))
 }
 
-test_that("default QC removes invalid, low INFO, ambiguous and duplicated SNPs", {
+test_that("default QC removes invalid, non-SNV, low INFO, ambiguous and duplicated SNPs", {
   res <- run_qc(info_min = 0.8)
-  # rs2 NA beta; rs3 INFO 0.7; rs4 A/T ambiguous; both rs6 duplicated
+  # rs2 NA beta; rs9 indel, rs10 G/G (not SNVs); rs3 INFO 0.7; rs4 A/T ambiguous;
+  # both rs6 duplicated
   expect_equal(res$df$snp, c("rs1", "rs5", "rs7", "rs8"))
-  expect_equal(res$qc$snps, c(9, 8, 7, 6, 4))
+  expect_equal(res$qc$snps, c(11, 10, 8, 7, 6, 4))
+  expect_equal(res$qc$step[3], "biallelic SNV (A/C/G/T)")
 })
 
 test_that("each filter can be switched off", {
   res <- run_qc(info_min = NULL, drop_ambiguous = FALSE, drop_duplicates = FALSE)
+  # the SNV filter always runs (PRS-CS drops non-SNVs anyway)
   expect_equal(nrow(res$df), 8)
-  expect_equal(res$qc$step, c("input", "valid effect, SE and P"))
+  expect_equal(res$qc$step, c("input", "valid effect, SE and P", "biallelic SNV (A/C/G/T)"))
 })
 
 test_that("qc_cols keep only rows equal to 0", {
