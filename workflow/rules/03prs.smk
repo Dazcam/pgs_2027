@@ -32,7 +32,10 @@ rule vcf_to_pgen:
     log:     PRS["vcf_to_pgen"]["log"]
     shell:
              """
+             # Autosomes only: the PRS-CS LD reference has no chrX, and importing chrX
+             # would need donor sex
              plink2 --vcf {input} dosage=DS \
+                    --autosome \
                     --set-missing-var-ids @:# \
                     --make-pgen \
                     --out {params.prefix} > {log} 2>&1
@@ -135,3 +138,4 @@ rule combine_scores:
 
 #--------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------
+
