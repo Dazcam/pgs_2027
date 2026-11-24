@@ -1,0 +1,521 @@
+---
+title: "Polygenic scores report"
+author: "Darren Cameron"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+params:
+  scores: null
+  summary: null
+  qc: null
+  qc_steps: null
+  pcs: null
+  eigenval: null
+  ancestry: null
+  id_strip: null
+  flag_donors: null
+  gwas: null
+  n_desc: null
+  settings: null
+  tag: null
+  bmark_dir: null
+---
+
+***
+
+```{r setup, include=FALSE, echo = FALSE, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(gt)
+library(DT)
+library(cowplot)
+library(ggrepel)
+
+gwas_ids    <- strsplit(params$gwas, ",")[[1]]          # GWAS in config order
+flag_donors <- strsplit(params$flag_donors, ",")[[1]]   # donors driving genotype PC1
+strip_id    <- function(x) str_remove(x, params$id_strip)  # e.g. 12971_FC -> 12971
+qc_files    <- strsplit(params$qc, ",")[[1]]
+qc_step_files <- strsplit(params$qc_steps, ",")[[1]]
+tag         <- params$tag
+bmark_dir   <- params$bmark_dir
+
+split_pairs <- function(x, names) {
+  strsplit(x, ";")[[1]] |>
+    str_split_fixed("\\|", length(names)) |>
+    as_tibble(.name_repair = "minimal") |>
+    set_names(names)
+}
+
+settings <- split_pairs(params$settings, c("group", "setting", "value"))
+n_desc   <- split_pairs(params$n_desc, c("gwas", "n_method"))
+
+# Deliverable table and per-GWAS summary
+scores  <- read_tsv(params$scores, show_col_types = FALSE, col_types = cols(iid = col_character())) |>
+  mutate(iid_match = strip_id(iid))
+summary <- read_tsv(params$summary, show_col_types = FALSE)
+
+pgs_cols <- paste0("pgs_", gwas_ids)
+pgs_long <- scores |>
+  select(iid, all_of(pgs_cols)) |>
+  pivot_longer(-iid, names_to = "gwas", values_to = "pgs", names_prefix = "pgs_") |>
+  mutate(gwas = factor(gwas, levels = gwas_ids),
+         flagged = strip_id(iid) %in% strip_id(flag_donors))
+
+# GWAS QC tables written by format_gwas
+qc_long <- map(qc_files, \(f) read_tsv(f, show_col_types = FALSE)) |>
+  list_rbind() |>
+  mutate(gwas = factor(gwas, levels = gwas_ids))
+
+qc_steps <- map(qc_step_files, \(f) read_tsv(f, show_col_types = FALSE)) |>
+  list_rbind() |>
+  mutate(gwas = factor(gwas, levels = gwas_ids))
+
+# Within-cohort genotype PCs (PLINK 1.9, no header)
+eigenval <- tibble(pc = seq_along(read_lines(params$eigenval)),
+                   eigenvalue = as.numeric(read_lines(params$eigenval)))
+
+# Reference-projected ancestry inference (GenotypeQCtoHRC); find the header line
+anc_lines <- read_lines(params$ancestry, n_max = 50)
+anc_skip  <- which(str_detect(anc_lines, "\\bIID\\b"))[1] - 1
+ancestry  <- read_tsv(params$ancestry, skip = anc_skip, show_col_types = FALSE,
+                      col_types = cols(.default = col_character())) |>
+  mutate(iid_match = strip_id(IID),
+         across(c(EUR, PC1, PC2), as.numeric),
+         in_pgs = iid_match %in% scores$iid_match,
+         flagged = iid_match %in% strip_id(flag_donors))
+
+# Donors in the PGS table far from the European cluster on reference PC1 or PC2
+# (robust z > 5 against the GenotypeQCtoHRC European samples)
+eur_ref <- filter(ancestry, biogeographic_prediction == "European")
+robust_z <- function(x, ref) abs(x - median(ref, na.rm = TRUE)) / mad(ref, na.rm = TRUE)
+ancestry <- ancestry |>
+  mutate(off_cluster = in_pgs & (robust_z(PC1, eur_ref$PC1) > 5 | robust_z(PC2, eur_ref$PC2) > 5))
+
+scores_anc <- scores |>
+  left_join(ancestry |> select(iid_match, ref_PC1 = PC1, ref_PC2 = PC2, ancestry_call = biogeographic_prediction,
+                               p_eur = EUR, off_cluster),
+            by = "iid_match") |>
+  mutate(flagged = iid_match %in% strip_id(flag_donors))
+
+if (anyNA(scores_anc$ancestry_call)) {
+  warning("Donors without an ancestry call: ", paste(scores_anc$iid[is.na(scores_anc$ancestry_call)], collapse = ", "))
+}
+
+flag_lab <- function(df) filter(df, flagged)
+```
+
+***
+
+## PGS pipeline steps {.tabset}
+
+***
+
+We used [PRS-CS](https://github.com/getian107/PRScs) to compute polygenic scores (PGS) for neuropsychiatric conditions and a cortical size factor in the European-ancestry donors of the prenatal brain snRNA-seq cohort. The citation for PRS-CS is [Ge et al. (2019), DOI: 10.1038/s41467-019-09718-5](https://doi.org/10.1038/s41467-019-09718-5).
+
+***
+
+1. `get_containers`, `get_prscs`, `get_prscs_ref`, `get_gwas_sumstats`: get the container, PRS-CS, the LD reference and the GWAS summary statistics (00SETUP)
+2. `euro_samples`, `subset_vcf`, `vcf_to_plink`, `ld_prune`, `genotype_pcs`: European-ancestry donors, PLINK files and genotype PCs (01GENOTYPES)
+3. `format_gwas`: format and QC each GWAS for PRS-CS (02PREP-GWAS)
+4. `vcf_to_pgen`, `run_prscs`, `combine_weights`, `score`, `combine_scores`: PRS-CS weights, dosage scoring and the combined PGS table (03PRS)
+5. `prs_report`: generate this report
+
+***
+
+### Donors and ancestry {.tabset}
+
+***
+
+#### Ancestry calls
+
+***
+
+Donors are those with European ancestry in the sample sheet. Donors called Unclassified by GenotypeQCtoHRC were re-assigned to European in the eQTL study when their posterior probability of European ancestry was high (the tool's European threshold is 0.997).
+
+```{r donors_calls, echo = FALSE, message = FALSE, warning = FALSE}
+scores_anc |>
+  count(ancestry_call, name = "donors") |>
+  datatable(rownames = FALSE, options = list(dom = "t"))
+```
+
+***
+
+#### Donors to note
+
+***
+
+Donors re-assigned from Unclassified, flagged in the config (driving within-cohort PC1), or far from the European cluster on the reference PCs (robust z > 5 on PC1 or PC2).
+
+```{r donors_note, echo = FALSE, message = FALSE, warning = FALSE}
+scores_anc |>
+  filter(flagged | off_cluster | ancestry_call != "European") |>
+  transmute(donor = iid, ancestry_call, p_eur = round(p_eur, 3),
+            ref_PC1 = signif(ref_PC1, 3), ref_PC2 = signif(ref_PC2, 3), flagged, off_cluster) |>
+  datatable(rownames = FALSE, options = list(dom = "t", pageLength = 50))
+```
+
+***
+
+#### Reference PCs
+
+***
+
+PCs from projecting all genotyped samples onto 1000 Genomes (GenotypeQCtoHRC). Donors in the PGS table are outlined; flagged donors and donors far from the European cluster are labelled.
+
+```{r ref_pcs, echo = FALSE, message = FALSE, warning = FALSE, fig.dim = c(9, 6)}
+ggplot(ancestry, aes(PC1, PC2, colour = biogeographic_prediction)) +
+  geom_point(data = filter(ancestry, !in_pgs), alpha = 0.5, size = 2) +
+  geom_point(data = filter(ancestry, in_pgs), shape = 21, stroke = 0.8, size = 2.5,
+             fill = NA) +
+  geom_text_repel(data = filter(ancestry, flagged | off_cluster), aes(label = iid_match), colour = "black",
+                  size = 3.5, max.overlaps = 30) +
+  labs(colour = "GenotypeQCtoHRC call", title = "Reference-projected PCs") +
+  theme_classic(base_size = 14)
+```
+
+***
+
+#### Cohort PCs
+
+***
+
+PCs computed within the donors in the PGS table (LD-pruned, PLINK 1.9).
+
+```{r cohort_pcs, echo = FALSE, message = FALSE, warning = FALSE, fig.dim = c(11, 5)}
+pc_plt <- ggplot(scores_anc, aes(PC1, PC2)) +
+  geom_point(aes(colour = flagged), size = 2.5) +
+  geom_text_repel(data = flag_lab(scores_anc), aes(label = iid), size = 4) +
+  scale_colour_manual(values = c(`FALSE` = "grey50", `TRUE` = "firebrick"), guide = "none") +
+  labs(title = "Within-cohort PCs") +
+  theme_classic(base_size = 14)
+
+elbow_plt <- ggplot(eigenval, aes(pc, eigenvalue)) +
+  geom_line(colour = "steelblue", linewidth = 1) +
+  geom_point(colour = "steelblue", size = 2.5) +
+  scale_x_continuous(breaks = eigenval$pc) +
+  labs(x = "PC", y = "Eigenvalue", title = "Elbow plot") +
+  theme_classic(base_size = 14)
+
+plot_grid(pc_plt, elbow_plt, rel_widths = c(1.4, 1))
+```
+
+***
+
+### GWAS QC {.tabset}
+
+***
+
+#### QC steps
+
+***
+
+Each filter is counted for every GWAS, whether or not it is applied. **Failing** is the number of SNPs failing that filter on its own; **remaining** is the number left after the applied filters up to that row (blank if the filter is not applied). The **PRS-CS** columns count only the SNPs PRS-CS would use: rsID with compatible alleles in both the LD reference and the genotype .bim. Rows with an invalid SNP, BETA, SE or P are always removed.
+
+```{r qc_steps, echo = FALSE, message = FALSE, warning = FALSE}
+fmt_n <- \(x) if_else(is.na(x), "-", format(x, big.mark = ",", trim = TRUE))
+
+qc_steps |>
+  arrange(gwas) |>
+  transmute(GWAS = gwas, Step = label,
+            Applied = case_when(is.na(applied) ~ "", applied ~ "yes", TRUE ~ "no"),
+            `Failing (file)` = fmt_n(failing), `Failing (PRS-CS)` = fmt_n(failing_overlap),
+            `Remaining (file)` = fmt_n(remaining), `Remaining (PRS-CS)` = fmt_n(remaining_overlap)) |>
+  datatable(rownames = FALSE, filter = "top",
+            options = list(dom = "tip", scrollX = TRUE, pageLength = 10,
+                           columnDefs = list(list(className = "dt-right", targets = 3:6))))
+```
+
+***
+
+#### SNP overlap check
+
+***
+
+SNPs left after QC among those PRS-CS would use (from `format_gwas`), against the SNPs PRS-CS reported in common across the LD reference, sumstats and genotypes, summed over chromosomes. They should match; a difference means the matching in `format_gwas` does not reproduce PRS-CS's.
+
+```{r qc_overlap, echo = FALSE, message = FALSE, warning = FALSE}
+qc_steps |>
+  filter(!is.na(remaining_overlap)) |>
+  group_by(gwas) |>
+  slice_tail(n = 1) |>
+  ungroup() |>
+  transmute(gwas = as.character(gwas), expected = remaining_overlap) |>
+  left_join(summary |> transmute(gwas = as.character(gwas), snps_used), by = "gwas") |>
+  mutate(match = if_else(expected == snps_used, "yes", "no")) |>
+  gt() |>
+  cols_label(gwas = "GWAS", expected = "Expected (format_gwas)", snps_used = "Used (PRS-CS)", match = "Match") |>
+  fmt_number(columns = c(expected, snps_used), decimals = 0)
+```
+
+***
+
+#### Per-SNP N
+
+***
+
+Per-SNP N after QC; n_gwas is the value passed to PRS-CS.
+
+```{r qc_n, echo = FALSE, message = FALSE, warning = FALSE}
+qc_long |>
+  filter(type == "n") |>
+  select(gwas, name, value) |>
+  pivot_wider(names_from = name, values_from = value) |>
+  left_join(n_desc |> mutate(gwas = factor(gwas, levels = gwas_ids)), by = "gwas") |>
+  select(gwas, n_method, everything()) |>
+  mutate(across(where(is.numeric), \(x) round(x))) |>
+  datatable(rownames = FALSE, options = list(dom = "t", scrollX = TRUE))
+```
+
+***
+
+### PGS distributions
+
+***
+
+Standardised PGS (mean 0, SD 1 across donors). Flagged donors in red.
+
+```{r distributions, echo = FALSE, message = FALSE, warning = FALSE, fig.dim = c(11, 8)}
+ggplot(pgs_long, aes(pgs)) +
+  geom_histogram(bins = 25, fill = "grey70", colour = "white") +
+  geom_rug(data = filter(pgs_long, flagged), colour = "firebrick", linewidth = 1, length = unit(0.08, "npc")) +
+  facet_wrap(~ gwas, ncol = 3) +
+  labs(x = "Standardised PGS", y = "Donors") +
+  theme_classic(base_size = 13)
+```
+
+***
+
+### PGS correlations
+
+***
+
+Pearson correlations between standardised PGS across `r nrow(scores)` donors. At this sample size each correlation has a 95% interval of roughly &plusmn;`r round(1.96 / sqrt(nrow(scores) - 3), 2)`.
+
+```{r correlations, echo = FALSE, message = FALSE, warning = FALSE, fig.dim = c(9, 8)}
+cor_mat <- cor(scores[pgs_cols])
+dimnames(cor_mat) <- list(gwas_ids, gwas_ids)
+
+as_tibble(cor_mat, rownames = "gwas_1") |>
+  pivot_longer(-gwas_1, names_to = "gwas_2", values_to = "r") |>
+  mutate(gwas_1 = factor(gwas_1, levels = gwas_ids), gwas_2 = factor(gwas_2, levels = rev(gwas_ids))) |>
+  ggplot(aes(gwas_1, gwas_2, fill = r)) +
+  geom_tile(colour = "white") +
+  geom_text(aes(label = sprintf("%.2f", r)), size = 4) +
+  scale_fill_gradient2(low = "steelblue", mid = "white", high = "firebrick", limits = c(-1, 1)) +
+  labs(x = NULL, y = NULL) +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), panel.grid = element_blank())
+```
+
+***
+
+### Ancestry sensitivity {.tabset}
+
+***
+
+#### Correlation with PCs
+
+***
+
+Correlation of each standardised PGS with within-cohort PCs 1-5 and reference-projected PCs 1-2, in all donors and without the flagged donors.
+
+```{r pc_cor, echo = FALSE, message = FALSE, warning = FALSE}
+pc_vars <- c(paste0("PC", 1:5), "ref_PC1", "ref_PC2")
+
+pc_cor <- function(df, set) {
+  expand_grid(gwas = gwas_ids, pc = pc_vars) |>
+    mutate(r = map2_dbl(gwas, pc, \(g, p) cor(df[[paste0("pgs_", g)]], df[[p]], use = "complete.obs")),
+           donors = set)
+}
+
+bind_rows(pc_cor(scores_anc, "all"),
+          pc_cor(filter(scores_anc, !flagged), "without flagged")) |>
+  mutate(r = round(r, 2)) |>
+  pivot_wider(names_from = pc, values_from = r) |>
+  arrange(factor(gwas, levels = gwas_ids), donors) |>
+  datatable(rownames = FALSE, options = list(dom = "t", pageLength = 30, scrollX = TRUE))
+```
+
+***
+
+#### PGS against PC1
+
+***
+
+```{r pc1_plot, echo = FALSE, message = FALSE, warning = FALSE, fig.dim = c(11, 9)}
+scores_anc |>
+  select(iid, flagged, PC1, all_of(pgs_cols)) |>
+  pivot_longer(all_of(pgs_cols), names_to = "gwas", values_to = "pgs", names_prefix = "pgs_") |>
+  mutate(gwas = factor(gwas, levels = gwas_ids)) |>
+  ggplot(aes(PC1, pgs)) +
+  geom_point(aes(colour = flagged), size = 1.8) +
+  geom_smooth(method = "lm", se = FALSE, colour = "black", linewidth = 0.5) +
+  scale_colour_manual(values = c(`FALSE` = "grey50", `TRUE` = "firebrick"), guide = "none") +
+  facet_wrap(~ gwas, ncol = 3) +
+  labs(x = "Within-cohort PC1", y = "Standardised PGS") +
+  theme_classic(base_size = 13)
+```
+
+***
+
+### Adjusted GWAS
+
+***
+
+GWAS-by-subtraction outputs (`<trait>_adj_<trait>`) against the PGS for the trait they are adjusted for and for their parent trait. A negative correlation with the adjusting trait is expected in a target sample even though the latent factors are uncorrelated: estimation error in the adjusting GWAS enters the adjusted GWAS with the opposite sign (our interpretation; not tested here).
+
+```{r adjusted, echo = FALSE, message = FALSE, warning = FALSE, fig.dim = c(10, 9)}
+adj <- tibble(adjusted = gwas_ids[str_detect(gwas_ids, "_adj_")]) |>
+  mutate(parent   = str_remove(adjusted, "_adj_.*$"),
+         adjusted_for = str_remove(adjusted, "^.*_adj_")) |>
+  filter(parent %in% gwas_ids, adjusted_for %in% gwas_ids)
+
+if (nrow(adj) == 0) {
+  cat("No adjusted GWAS with both parent and adjusting trait in this run.")
+} else {
+  adj |>
+    pivot_longer(c(parent, adjusted_for), names_to = "comparison", values_to = "other") |>
+    mutate(data = map2(adjusted, other, \(a, o) tibble(x = scores[[paste0("pgs_", o)]],
+                                                        y = scores[[paste0("pgs_", a)]])),
+           r = map_dbl(data, \(d) cor(d$x, d$y)),
+           panel = paste0(adjusted, " vs ", other, " (r = ", sprintf("%.2f", r), ")")) |>
+    unnest(data) |>
+    ggplot(aes(x, y)) +
+    geom_point(colour = "grey40", size = 1.8) +
+    geom_smooth(method = "lm", se = FALSE, colour = "black", linewidth = 0.5) +
+    facet_wrap(~ panel, ncol = 2) +
+    labs(x = "Standardised PGS (comparison trait)", y = "Standardised PGS (adjusted GWAS)") +
+    theme_classic(base_size = 12)
+}
+```
+
+***
+
+### Settings {.tabset}
+
+***
+
+#### Pipeline
+
+***
+
+```{r settings, echo = FALSE, message = FALSE, warning = FALSE}
+settings |>
+  gt(groupname_col = "group") |>
+  tab_header(title = "Pipeline settings", subtitle = paste0("PRS-CS output tag: ", tag)) |>
+  cols_label(setting = "Setting", value = "Value") |>
+  tab_options(table.font.size = px(14), heading.align = "left") |>
+  tab_style(style = cell_text(weight = "bold"), locations = cells_row_groups())
+```
+
+#### Per-GWAS N
+
+***
+
+```{r settings_n, echo = FALSE, message = FALSE, warning = FALSE}
+n_desc |>
+  left_join(summary |> select(gwas, snps_used), by = "gwas") |>
+  left_join(qc_long |> filter(type == "n", name == "n_gwas") |> transmute(gwas = as.character(gwas), n_gwas = value),
+            by = "gwas") |>
+  gt() |>
+  tab_header(title = "Per-GWAS N and SNPs used") |>
+  cols_label(gwas = "GWAS", n_method = "Per-SNP N", n_gwas = "n_gwas (PRS-CS)", snps_used = "SNPs in score") |>
+  fmt_number(columns = c(n_gwas, snps_used), decimals = 0) |>
+  tab_options(table.font.size = px(14), heading.align = "left")
+```
+
+***
+
+### Benchmarking {.tabset}
+
+***
+
+#### Table
+
+```{r benchmarking, echo = FALSE, message = FALSE, warning = FALSE}
+# Rules in this workflow, longest first so e.g. get_prscs_ref is not read as get_prscs
+rules <- c("get_containers", "get_prscs", "get_prscs_ref", "get_gwas_sumstats",
+           "euro_samples", "subset_vcf", "vcf_to_plink", "ld_prune", "genotype_pcs",
+           "format_gwas", "vcf_to_pgen", "run_prscs", "combine_weights", "score",
+           "combine_scores", "prs_report")
+rules <- rules[order(-nchar(rules))]
+
+files <- list.files(bmark_dir, pattern = "^0[0-3][a-z_]+\\..*\\.benchmark\\.txt$", full.names = TRUE)
+
+gwas_re <- paste0("^_(", paste(gwas_ids[order(-nchar(gwas_ids))], collapse = "|"), ")(_|$)")
+
+benchmarks <- map(files, function(f) {
+  df    <- read.table(f, header = TRUE, sep = "\t")
+  stem  <- basename(f) |> str_remove("\\.benchmark\\.txt$")
+  pipe  <- str_extract(stem, "^[^.]+")
+  name  <- str_remove(stem, "^[^.]+\\.")
+  rule  <- str_extract(name, paste0("^(", paste(rules, collapse = "|"), ")"))
+  rest  <- str_remove(name, paste0("^", rule))
+  tibble(pipeline = pipe, rule = rule, rest = rest,
+         runtime_sec = df$s, max_rss = df$max_rss)
+}) |>
+  list_rbind()
+
+# Keep only current GWAS and the current PRS-CS tag, so old runs drop out
+benchmarks <- benchmarks |>
+  filter(!is.na(rule),
+         rest == "" | str_detect(rest, gwas_re) | str_detect(rest, "^_a\\d+_b"),
+         !str_detect(rest, "_a\\d+_b") | str_detect(rest, fixed(tag)))
+
+summary_bm <- benchmarks |>
+  group_by(pipeline, rule) |>
+  summarise(n = n(),
+            mean_runtime_min = mean(runtime_sec) / 60,
+            sd_runtime_min = sd(runtime_sec) / 60,
+            mean_ram_gb = mean(max_rss) / 1024,
+            sd_ram_gb = sd(max_rss) / 1024,
+            .groups = "drop") |>
+  mutate(sd_runtime_min = if_else(is.na(sd_runtime_min), 0, sd_runtime_min),
+         sd_ram_gb = if_else(is.na(sd_ram_gb), 0, sd_ram_gb)) |>
+  mutate(across(where(is.numeric), ~ round(., 3))) |>
+  arrange(pipeline, rule)
+
+summary_bm |>
+  gt(groupname_col = "pipeline") |>
+  tab_header(title = "Table X. Benchmarking", subtitle = "Means and SD across jobs") |>
+  cols_label(rule = "Rule", n = "N", mean_runtime_min = "Mean Runtime (min)",
+             sd_runtime_min = "SD Runtime (min)", mean_ram_gb = "Mean RAM (GB)", sd_ram_gb = "SD RAM (GB)") |>
+  fmt_number(columns = c(mean_runtime_min, sd_runtime_min, mean_ram_gb, sd_ram_gb), decimals = 2) |>
+  tab_options(table.font.size = px(14),
+              table.border.top.style = "none",
+              table.border.bottom.style = "solid",
+              table.border.bottom.width = px(2),
+              table.border.bottom.color = "black",
+              heading.align = "center") |>
+  tab_style(style = cell_text(weight = "bold"), locations = cells_column_labels(everything()))
+```
+
+***
+
+#### Plot
+
+***
+
+```{r runtime_plt, echo = FALSE, message = FALSE, warning = FALSE, fig.dim = c(10, 6)}
+runtime_plt <- ggplot(summary_bm, aes(x = reorder(rule, mean_runtime_min), y = mean_runtime_min)) +
+  geom_col(fill = "steelblue") +
+  geom_errorbar(aes(ymin = mean_runtime_min - sd_runtime_min, ymax = mean_runtime_min + sd_runtime_min),
+                width = 0.3, colour = "black", linewidth = 0.6) +
+  coord_flip() +
+  labs(x = "Rule", y = "Runtime (minutes)", title = "Mean runtime per rule") +
+  theme_classic(base_size = 16) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 18),
+        axis.text = element_text(size = 14), axis.title = element_text(size = 16))
+
+mem_plt <- ggplot(summary_bm, aes(x = reorder(rule, mean_ram_gb), y = mean_ram_gb)) +
+  geom_col(fill = "darkorange") +
+  geom_errorbar(aes(ymin = mean_ram_gb - sd_ram_gb, ymax = mean_ram_gb + sd_ram_gb),
+                width = 0.3, colour = "black", linewidth = 0.6) +
+  coord_flip() +
+  labs(x = "Rule", y = "RAM (GB)", title = "Mean RAM usage per rule") +
+  theme_classic(base_size = 16) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 18),
+        axis.text = element_text(size = 14), axis.title = element_text(size = 16))
+
+plot_grid(runtime_plt, mem_plt)
+```

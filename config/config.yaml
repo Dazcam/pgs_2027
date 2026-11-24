@@ -214,17 +214,25 @@ genotypes:
 
 prep_gwas:
   format_gwas:
-    # QC settings (applied to every GWAS; null switches a filter off)
-    info_min: 0.8            # minimum INFO, where the GWAS has an INFO column
-    drop_ambiguous: true     # drop strand-ambiguous SNPs (A/T, C/G)
-    drop_duplicates: true    # drop SNP IDs that appear more than once
-    n_min_frac: null         # drop SNPs with N < n_min_frac x 90th percentile N (column / case_control only)
+    # GWAS QC filters (applied to every GWAS). Each filter is always counted, in the
+    # whole file and among the SNPs PRS-CS would use (rsID with compatible alleles in
+    # the LD reference and the genotype .bim); apply: true removes the failing SNPs.
+    # Off by default: the collaborators' GWAS are already QCed. Rows with a missing
+    # or invalid SNP, BETA, SE or P are always removed
+    filters:
+      snv:        {apply: false}                 # biallelic single-base SNVs (PRS-CS drops others itself)
+      qc_cols:    {apply: false}                 # per-GWAS qc_cols == 0 (GenomicSEM error/warning)
+      info:       {apply: false, min: 0.8}       # INFO >= min, where the GWAS has an INFO column
+      ambiguous:  {apply: false}                 # not strand-ambiguous (A/T, C/G)
+      duplicates: {apply: true}                  # unique SNP IDs (PRS-CS keeps the last row of a duplicate)
+      low_n:      {apply: false, min_frac: 0.5}  # N >= min_frac x 90th percentile N (n: column / case_control)
     n_summary: median        # median | mean of per-SNP N, used as PRS-CS n_gwas
     auto_maf: [0.1, 0.4]     # MAF window for n: auto
     script: ../scripts/gwas_format.R
     sumstats: ../results/02PREP-GWAS/{gwas}/{gwas}.prscs.txt
     n_gwas: ../results/02PREP-GWAS/{gwas}/{gwas}.n_gwas.txt
     qc: ../results/02PREP-GWAS/{gwas}/{gwas}.qc.tsv
+    qc_steps: ../results/02PREP-GWAS/{gwas}/{gwas}.qc_steps.tsv
     benchmark: reports/benchmarks/02prep_gwas.format_gwas_{gwas}.benchmark.txt
     log: ../results/00LOG/02PREP-GWAS/format_gwas_{gwas}.log
 
@@ -268,6 +276,16 @@ prs:
     summary: ../results/03PRS/pgs_summary_{tag}.tsv
     benchmark: reports/benchmarks/03prs.combine_scores_{tag}.benchmark.txt
     log: ../results/00LOG/03PRS/combine_scores_{tag}.log
+  prs_report:
+    # GenotypeQCtoHRC ancestry inference for all genotyped samples (eQTL study), copied in by hand
+    ancestry_inference: ../resources/sheets/ancestry_inference.txt
+    ancestry_id_strip: "_FC$"        # regex removed from its IDs to match the sample sheet
+    flag_donors: ["2143", "15821", "14404"]   # donors driving genotype PC1
+    rmd: scripts/prs_report.Rmd
+    html: reports/03PRS/03prs_report_{tag}.html
+    bmark_dir: reports/benchmarks
+    benchmark: reports/benchmarks/03prs.prs_report_{tag}.benchmark.txt
+    log: ../results/00LOG/03PRS/prs_report_{tag}.log
 
 #--------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------

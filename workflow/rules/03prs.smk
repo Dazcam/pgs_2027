@@ -21,6 +21,45 @@ def prs_path(rule, key):
     # Fill {tag}; leave the {gwas} and {chr} wildcards in place
     return PRS[rule][key].replace("{tag}", PRSCS_TAG)
 
+def n_desc(gwas):
+    # Short description of how per-SNP N was set for a GWAS, for the report
+    n = config["gwas"][gwas]["n"]
+    if n["method"] == "column":
+        return f"column: {n['col']} x {n['scale']}"
+    if n["method"] == "case_control":
+        return f"case_control: 4 / (1/{n['cases']} + 1/{n['controls']})"
+    if n["method"] == "fixed":
+        return f"fixed: {n['value']}"
+    return f"auto ({config['gwas'][gwas]['trait_type']})"
+
+def report_settings():
+    # group|setting|value entries joined by ; (values come from the keys the rules use)
+    qc   = config["prep_gwas"]["format_gwas"]
+    geno = config["genotypes"]
+    rows = [
+        ("PRS-CS", "PRS-CS commit", config["setup"]["get_prscs"]["commit"][:7]),
+        ("PRS-CS", "LD reference", config["setup"]["get_prscs_ref"]["ld_dir"].split("/")[-1]),
+        ("PRS-CS", "a", RUN["a"]),
+        ("PRS-CS", "b", RUN["b"]),
+        ("PRS-CS", "phi", "auto" if RUN["phi"] is None else RUN["phi"]),
+        ("PRS-CS", "MCMC iterations / burn-in / thin", f"{RUN['n_iter']} / {RUN['n_burnin']} / {RUN['thin']}"),
+        ("PRS-CS", "Seed", RUN["seed"]),
+        ("GWAS QC", "Invalid SNP, BETA, SE or P removed", "always"),
+        *[("GWAS QC", f"Filter: {name}",
+           ("applied" if f.get("apply") else "counted only") +
+           "".join(f", {k} {v}" for k, v in f.items() if k != "apply"))
+          for name, f in qc["filters"].items()],
+        ("GWAS QC", "n_gwas summary of per-SNP N", qc["n_summary"]),
+        ("GWAS QC", "MAF window for auto N", "-".join(str(x) for x in qc["auto_maf"])),
+        ("Donors", "Ancestry kept from sample sheet", geno["euro_samples"]["ancestry"]),
+        ("Donors", "Genotype PCA MAF", geno["ld_prune"]["maf"]),
+        ("Donors", "LD pruning (window step r2)", geno["ld_prune"]["indep_pairwise"]),
+        ("Donors", "Genotype PCs", geno["genotype_pcs"]["pcs"]),
+        ("Scoring", "Genotypes", "imputation dosages (PLINK 2, autosomes)"),
+        ("Scoring", "Score", "sum of dosage x posterior effect, standardised across donors"),
+    ]
+    return ";".join(f"{g}|{k}|{v}" for g, k, v in rows)
+
 rule vcf_to_pgen:
     input:   config["genotypes"]["subset_vcf"]["output"]
     output:  PRS["vcf_to_pgen"]["output"]
@@ -136,6 +175,50 @@ rule combine_scores:
     log:     prs_path("combine_scores", "log")
     script:  PRS["combine_scores"]["script"]
 
-#--------------------------------------------------------------------------------------
-#--------------------------------------------------------------------------------------
+rule prs_report:
+    input:   scores    = rules.combine_scores.output.scores,
+             summary   = rules.combine_scores.output.summary,
+             qc        = expand(config["prep_gwas"]["format_gwas"]["qc"], gwas = GWAS),
+             qc_steps  = expand(config["prep_gwas"]["format_gwas"]["qc_steps"], gwas = GWAS),
+             pcs       = config["genotypes"]["genotype_pcs"]["output"],
+             ancestry  = PRS["prs_report"]["ancestry_inference"],
+             rmd       = PRS["prs_report"]["rmd"]
+    output:  prs_path("prs_report", "html")
+    params:  gwas        = ",".join(GWAS),
+             n_desc      = ";".join(f"{g}|{n_desc(g)}" for g in GWAS),
+             qc          = lambda w, input: ",".join(input.qc),
+             qc_steps    = lambda w, input: ",".join(input.qc_steps),
+             eigenval    = config["genotypes"]["genotype_pcs"]["prefix"] + ".eigenval",
+             id_strip    = PRS["prs_report"]["ancestry_id_strip"],
+             flag_donors = ",".join(PRS["prs_report"]["flag_donors"]),
+             settings    = report_settings(),
+             tag         = PRSCS_TAG,
+             bmark_dir   = PRS["prs_report"]["bmark_dir"]
+    singularity: config["containers"]["prs"]
+    resources: mem_mb = 10000, time = "00:30:00"
+    message: "Generate the PGS report"
+    benchmark: prs_path("prs_report", "benchmark")
+    log:     prs_path("prs_report", "log")
+    shell:
+             """
+             Rscript -e "wd <- getwd(); rmarkdown::render('{input.rmd}', \
+                 output_file = file.path(wd, '{output}'), \
+                 knit_root_dir = wd, \
+                 params = list(scores      = '{input.scores}', \
+                               summary     = '{input.summary}', \
+                               qc          = '{params.qc}', \
+                               qc_steps    = '{params.qc_steps}', \
+                               pcs         = '{input.pcs}', \
+                               eigenval    = '{params.eigenval}', \
+                               ancestry    = '{input.ancestry}', \
+                               id_strip    = '{params.id_strip}', \
+                               flag_donors = '{params.flag_donors}', \
+                               gwas        = '{params.gwas}', \
+                               n_desc      = '{params.n_desc}', \
+                               settings    = '{params.settings}', \
+                               tag         = '{params.tag}', \
+                               bmark_dir   = '{params.bmark_dir}'))" > {log} 2>&1
+             """
 
+#--------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------

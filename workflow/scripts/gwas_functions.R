@@ -10,7 +10,9 @@
 #            gwas_is_snv()        flag biallelic single-base SNVs (A/C/G/T, alleles differ)
 #            gwas_is_ambiguous()  flag strand-ambiguous SNPs (A/T, C/G)
 #            gwas_snp_n()         per-SNP N by method (column, case_control, fixed, auto)
-#            gwas_qc()            sequential QC with SNP counts per step
+#            gwas_allele_key()    allele-pair key invariant to allele order and strand
+#            gwas_in_overlap()    flag SNPs PRS-CS would use (LD reference and .bim)
+#            gwas_qc()            QC: every filter counted, switched-on ones applied
 #            gwas_n_summary()     single N for PRS-CS from per-SNP N
 #
 # Packages:  caller must have readr and dplyr available (pkg:: calls used throughout)
@@ -106,51 +108,116 @@ gwas_snp_n <- function(df, n_cfg, trait_type, auto_maf) {
   stop("n method must be column, case_control, fixed or auto, not '", method, "'")
 }
 
-gwas_qc <- function(df, info_min = NULL, drop_ambiguous = TRUE, drop_duplicates = TRUE,
-                    qc_cols = character(0), n_min_frac = NULL) {
+gwas_allele_key <- function(a1, a2) {
 
-  # df has standard columns snp, a1, a2, beta, se, p, n (and info if present)
-  # Returns list(df = filtered data, qc = SNPs remaining after each step)
-  steps <- list()
-  log_step <- function(step, d) steps[[length(steps) + 1]] <<- tibble::tibble(step = step, snps = nrow(d))
+  # Key for an allele pair that is the same whichever allele is listed first and
+  # on either strand (A/G, G/A, T/C and C/T all give "AG"), as PRS-CS matches
+  # alleles. NA unless both alleles are single A/C/G/T bases and differ
+  comp <- c(A = "T", C = "G", G = "C", T = "A")
+  a1   <- toupper(a1)
+  a2   <- toupper(a2)
+  ok   <- a1 %in% names(comp) & a2 %in% names(comp) & a1 != a2
 
-  log_step("input", df)
+  sorted_pair <- function(x, y) ifelse(x < y, paste0(x, y), paste0(y, x))
+  key <- pmin(sorted_pair(a1, a2), sorted_pair(unname(comp[a1]), unname(comp[a2])))
+  key[!ok] <- NA_character_
+  key
+}
 
-  df <- df |>
-    dplyr::filter(!is.na(snp), !is.na(beta), is.finite(beta), !is.na(se), se > 0,
-                  !is.na(p), p > 0, p <= 1)
-  log_step("valid effect, SE and P", df)
+gwas_in_overlap <- function(snp, a1, a2, ref, bim) {
 
-  df <- df[gwas_is_snv(df$a1, df$a2), ]
-  log_step("biallelic SNV (A/C/G/T)", df)
+  # TRUE for GWAS rows PRS-CS would use: rsID with compatible alleles in both the
+  # LD reference and the genotype .bim, on the same chromosome in those two
+  # ref, bim: tibbles with chr, snp, a1, a2
+  site_key <- function(d) paste(sub("^chr", "", d$chr), d$snp, gwas_allele_key(d$a1, d$a2))
+  ref_ok   <- !is.na(gwas_allele_key(ref$a1, ref$a2))
+  shared   <- intersect(site_key(ref)[ref_ok], site_key(bim))
 
-  for (col in qc_cols) {
-    df <- df[!is.na(df[[col]]) & as.numeric(df[[col]]) == 0, ]
+  # Drop the chromosome: the GWAS is matched on rsID and alleles only
+  shared_snp <- sub("^\\S+ ", "", shared)
+  key <- gwas_allele_key(a1, a2)
+  !is.na(key) & paste(snp, key) %in% shared_snp
+}
+
+gwas_qc <- function(df, filters = list(), qc_cols = character(0), low_n_ok = TRUE) {
+
+  # df has standard columns snp, a1, a2, beta, se, p, n, plus info and qc_cols where
+  # present, and overlap (TRUE if PRS-CS would use the SNP) if known
+  # filters: named list, one entry per filter, each list(apply = TRUE/FALSE, ...)
+  #   snv, qc_cols, info (min), ambiguous, duplicates, low_n (min_frac)
+  # Rows with a missing or invalid SNP, BETA, SE or P are always removed. Every other
+  # filter is evaluated on the valid rows, on its own (independent of the others),
+  # and only the applied ones remove SNPs
+  # Returns list(df = filtered data, qc = one row per step) with columns
+  #   failing / failing_overlap:     SNPs failing the step on its own
+  #   remaining / remaining_overlap: SNPs left after the applied steps up to this one
+  applied <- function(f) isTRUE(filters[[f]][["apply"]])
+  setting <- function(f, key, default) {
+    x <- filters[[f]][[key]]
+    if (is.null(x)) default else x
   }
-  if (length(qc_cols) > 0) log_step(paste0(paste(qc_cols, collapse = " & "), " == 0"), df)
 
-  if (!is.null(info_min) && "info" %in% colnames(df)) {
-    df <- df |> dplyr::filter(!is.na(info), info >= info_min)
-    log_step(paste0("INFO >= ", info_min), df)
+  # overlap NA (not known) gives NA overlap counts
+  if (!"overlap" %in% colnames(df)) df$overlap <- NA
+  n_ovl <- function(x) sum(x)
+
+  valid <- !is.na(df$snp) & !is.na(df$beta) & is.finite(df$beta) &
+           !is.na(df$se) & df$se > 0 & !is.na(df$p) & df$p > 0 & df$p <= 1
+
+  steps <- list(
+    tibble::tibble(step = "input", label = "input", applied = NA,
+                   failing = NA_integer_, failing_overlap = NA_integer_,
+                   remaining = nrow(df), remaining_overlap = n_ovl(df$overlap)),
+    tibble::tibble(step = "valid", label = "valid SNP, effect, SE and P", applied = TRUE,
+                   failing = sum(!valid), failing_overlap = n_ovl(!valid & df$overlap),
+                   remaining = sum(valid), remaining_overlap = n_ovl(valid & df$overlap)))
+  df <- df[valid, ]
+
+  # Pass (TRUE) / fail for each filter that applies to this GWAS
+  info_min <- setting("info", "min", 0.8)
+  min_frac <- setting("low_n", "min_frac", 0.5)
+  pass   <- list()
+  labels <- list()
+
+  pass$snv   <- gwas_is_snv(df$a1, df$a2)
+  labels$snv <- "biallelic SNV (A/C/G/T)"
+
+  if (length(qc_cols) > 0) {
+    pass$qc_cols   <- Reduce(`&`, lapply(qc_cols, \(col) !is.na(df[[col]]) & as.numeric(df[[col]]) == 0))
+    labels$qc_cols <- paste0(paste(qc_cols, collapse = " & "), " == 0")
   }
 
-  if (isTRUE(drop_ambiguous)) {
-    df <- df[!gwas_is_ambiguous(df$a1, df$a2), ]
-    log_step("not strand-ambiguous", df)
+  if ("info" %in% colnames(df)) {
+    pass$info   <- !is.na(df$info) & df$info >= info_min
+    labels$info <- paste0("INFO >= ", info_min)
   }
 
-  if (isTRUE(drop_duplicates)) {
-    dup <- df$snp[duplicated(df$snp)]
-    df  <- df[!df$snp %in% dup, ]
-    log_step("unique SNP ID", df)
+  pass$ambiguous   <- !gwas_is_ambiguous(df$a1, df$a2)
+  labels$ambiguous <- "not strand-ambiguous (A/T, C/G)"
+
+  dup <- df$snp[duplicated(df$snp)]
+  pass$duplicates   <- !df$snp %in% dup
+  labels$duplicates <- "unique SNP ID"
+
+  if (low_n_ok) {
+    n_cut <- min_frac * stats::quantile(df$n, 0.9, na.rm = TRUE, names = FALSE)
+    pass$low_n   <- !is.na(df$n) & df$n >= n_cut
+    labels$low_n <- paste0("N >= ", min_frac, " x 90th percentile N")
   }
 
-  if (!is.null(n_min_frac)) {
-    n_cut <- n_min_frac * stats::quantile(df$n, 0.9, na.rm = TRUE, names = FALSE)
-    df    <- df |> dplyr::filter(!is.na(n), n >= n_cut)
-    log_step(paste0("N >= ", n_min_frac, " x 90th percentile"), df)
+  # Count each filter on its own, then apply the switched-on ones in order
+  keep <- rep(TRUE, nrow(df))
+  for (f in names(pass)) {
+    on <- applied(f)
+    if (on) keep <- keep & pass[[f]]
+    steps[[length(steps) + 1]] <- tibble::tibble(
+      step = f, label = labels[[f]], applied = on,
+      failing = sum(!pass[[f]]), failing_overlap = n_ovl(!pass[[f]] & df$overlap),
+      remaining         = if (on) sum(keep) else NA_integer_,
+      remaining_overlap = if (on) n_ovl(keep & df$overlap) else NA_integer_)
   }
 
+  df <- df[keep, ]
   if (nrow(df) == 0) stop("No SNPs left after QC")
 
   list(df = df, qc = dplyr::bind_rows(steps))
