@@ -1,12 +1,13 @@
 snakefile: Snakefile
-cores: 1
+cores: 8          # cluster mode: the most threads any one job can use (caps {threads})
+local-cores: 1    # local rules on the login node use at most 1 core
 use-conda: True
 use-envmodules: True
 conda-frontend: conda
 use-singularity: True
 singularity-args: "--bind /shared/scratch/SCWF00021/pgs_2027 --bind /shared/apps/ --pwd /shared/scratch/SCWF00021/pgs_2027/workflow"
 keep-going: True
-jobs: 10
+jobs: 90
 rerun-incomplete: True
 printshellcmds: True
 executor: cluster-generic
@@ -20,11 +21,28 @@ cluster-generic-submit-cmd:
     --job-name=smk-{rule}
     --output=../results/00LOG/smk-logfiles/{rule}.%j.out
     --error=../results/00LOG/smk-logfiles/{rule}.%j.err
-    --account=SCWF00021_n_bray_19
-    --partition=htc_genoa
+    --account=scwf00021_n_bray_19
+    --partition={resources.partition}
+    --qos={resources.qos}
 
 default-resources:
   - ntasks=1
   - mem_mb=5000
   - time="1-00:00:00"
   - threads=1
+  - partition="htc_genoa"
+  - qos="normal"
+  - genoa=1
+
+# PRS-CS runs on htc_rome under maxjobs500_rome (96 running, 500 submitted, 192 CPUs).
+# Everything else stays on htc_genoa: the PLINK module is built for zen4 and crashes
+# on Rome nodes (Illegal instruction)
+set-resources:
+  run_prscs:
+    partition: "htc_rome"
+    qos: "maxjobs500_rome"
+    genoa: 0
+
+# htc_genoa allows 10 submitted jobs per user; keep Snakemake's genoa jobs below that
+resources:
+  - genoa=8

@@ -149,8 +149,8 @@ rule run_prscs:
              thin       = RUN["thin"],
              seed       = RUN["seed"]
     conda:   RUN["env"]
-    threads: 4
-    resources: mem_mb = 16000, time = "06:00:00"
+    threads: 2
+    resources: mem_mb = 16000, time = "06:00:00", threads = 2  # 2 CPUs x 90 jobs (as > 300 jobs runs using maxjobs500_rome)
     message: "PRS-CS posterior effects for {wildcards.gwas} ({wildcards.nset}), chromosome {wildcards.chr}"
     benchmark: prs_path("run_prscs", "benchmark")
     log:     prs_path("run_prscs", "log")
