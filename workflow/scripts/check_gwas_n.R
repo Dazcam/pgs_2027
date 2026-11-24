@@ -78,7 +78,7 @@ check_gwas <- function(gwas) {
 
   # Columns to read
   cols      <- unlist(cfg$cols)
-  n_cfg     <- cfg$n
+  n_cfg     <- cfg$n_calc
   n_raw     <- unlist(n_cfg[c("col", "cases", "controls")])
   chr_col   <- intersect(chr_cols, header)[1]
   case_col  <- intersect(case_cols, header)[1]

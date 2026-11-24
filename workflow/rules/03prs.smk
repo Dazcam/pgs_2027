@@ -5,6 +5,8 @@
 #--------------------------------------------------------------------------------------
 
 PRS = config["prs"]
+
+localrules: set_n_gwas   # writes one number; not worth a SLURM job
 RUN = PRS["run_prscs"]
 CHROMS = list(range(1, 23))
 
@@ -17,13 +19,37 @@ else:
     PRSCS_TAG = "a%d_b%.1f_phi%1.0e" % (RUN["a"], RUN["b"], RUN["phi"])
     PHI_ARG   = f"--phi={RUN['phi']}"
 
-def prs_path(rule, key):
-    # Fill {tag}; leave the {gwas} and {chr} wildcards in place
-    return PRS[rule][key].replace("{tag}", PRSCS_TAG)
+# N sets for --n_gwas: n_st1 (Supplementary Table 1, primary) and n_calc (from the file)
+N_SETS    = PRS["n_sets"]
+N_PRIMARY = PRS["n_primary"]
+
+def prs_path(rule, key, nset = None):
+    # Fill {tag}, and {nset} if given; leave the {gwas} and {chr} wildcards in place
+    path = PRS[rule][key].replace("{tag}", PRSCS_TAG)
+    return path if nset is None else path.replace("{nset}", nset)
+
+def n_source(gwas, nset):
+    # Config key that gives the N for a GWAS in an N set: n_st1 falls back to n_calc
+    if nset == "n_st1" and "n_st1" in config["gwas"][gwas]:
+        return "n_st1"
+    return "n_calc"
+
+def nset_gwas(nset):
+    # GWAS run in an N set: all of them in the primary set; in the others, only those
+    # whose N differs from the primary set (the rest would repeat it exactly)
+    if nset == N_PRIMARY:
+        return GWAS
+    return [g for g in GWAS if n_source(g, nset) != n_source(g, N_PRIMARY)]
+
+def n_value_desc(gwas, nset):
+    # Where the N in an N set comes from, for the log and the report
+    if n_source(gwas, nset) == "n_st1":
+        return "Supplementary Table 1"
+    return "file: " + n_desc(gwas)
 
 def n_desc(gwas):
-    # Short description of how per-SNP N was set for a GWAS, for the report
-    n = config["gwas"][gwas]["n"]
+    # Short description of how per-SNP N is calculated from a GWAS file (n_calc)
+    n = config["gwas"][gwas]["n_calc"]
     if n["method"] == "column":
         return f"column: {n['col']} x {n['scale']}"
     if n["method"] == "case_control":
@@ -49,7 +75,9 @@ def report_settings():
            ("applied" if f.get("apply") else "counted only") +
            "".join(f", {k} {v}" for k, v in f.items() if k != "apply"))
           for name, f in qc["filters"].items()],
-        ("GWAS QC", "n_gwas summary of per-SNP N", qc["n_summary"]),
+        ("N for PRS-CS", "N sets run", ", ".join(N_SETS)),
+        ("N for PRS-CS", "Primary N set (deliverable)", N_PRIMARY),
+        ("GWAS QC", "n_gwas summary of per-SNP N (n_calc)", qc["n_summary"]),
         ("GWAS QC", "MAF window for auto N", "-".join(str(x) for x in qc["auto_maf"])),
         ("Donors", "Ancestry kept from sample sheet", geno["euro_samples"]["ancestry"]),
         ("Donors", "Genotype PCA MAF", geno["ld_prune"]["maf"]),
@@ -80,18 +108,39 @@ rule vcf_to_pgen:
                     --out {params.prefix} > {log} 2>&1
              """
 
+rule set_n_gwas:
+    input:   n_calc = config["prep_gwas"]["format_gwas"]["n_gwas"]
+    output:  PRS["set_n_gwas"]["output"]
+    wildcard_constraints: gwas = "|".join(GWAS), nset = "|".join(N_SETS)
+    params:  source = lambda w: n_source(w.gwas, w.nset),
+             n_st1  = lambda w: config["gwas"][w.gwas].get("n_st1", ""),
+             desc   = lambda w: n_value_desc(w.gwas, w.nset)
+    message: "Set n_gwas for {wildcards.gwas} in N set {wildcards.nset}"
+    benchmark: PRS["set_n_gwas"]["benchmark"]
+    log:     PRS["set_n_gwas"]["log"]
+    shell:
+             """
+             if [ "{params.source}" = "n_st1" ]; then
+                 echo {params.n_st1} > {output}
+             else
+                 cp {input.n_calc} {output}
+             fi
+             echo "{wildcards.gwas} {wildcards.nset}: n_gwas $(cat {output}) ({params.desc})" > {log}
+             """
+
 rule run_prscs:
     input:   sumstats = config["prep_gwas"]["format_gwas"]["sumstats"],
-             n_gwas   = config["prep_gwas"]["format_gwas"]["n_gwas"],
+             n_gwas   = PRS["set_n_gwas"]["output"],
              bed      = config["genotypes"]["vcf_to_plink"]["output"],   # PRS-CS reads the .bim at this prefix
              prscs    = config["setup"]["get_prscs"]["output"],
              ld_ref   = config["setup"]["get_prscs_ref"]["output"]
     output:  prs_path("run_prscs", "output")
-    wildcard_constraints: gwas = "|".join(GWAS), chr = "|".join(str(c) for c in CHROMS)
+    wildcard_constraints: gwas = "|".join(GWAS), chr = "|".join(str(c) for c in CHROMS),
+                          nset = "|".join(N_SETS)
     params:  script     = config["setup"]["get_prscs"]["dir"] + "/PRScs.py",
              ref_dir    = config["setup"]["get_prscs_ref"]["ld_dir"],
              bim_prefix = config["genotypes"]["vcf_to_plink"]["prefix"],
-             out_prefix = RUN["out_prefix"],
+             out_prefix = lambda w: RUN["out_prefix"].format(nset = w.nset, gwas = w.gwas),
              a          = RUN["a"],
              b          = RUN["b"],
              phi_arg    = PHI_ARG,
@@ -102,7 +151,7 @@ rule run_prscs:
     conda:   RUN["env"]
     threads: 4
     resources: mem_mb = 16000, time = "06:00:00"
-    message: "PRS-CS posterior effects for {wildcards.gwas}, chromosome {wildcards.chr}"
+    message: "PRS-CS posterior effects for {wildcards.gwas} ({wildcards.nset}), chromosome {wildcards.chr}"
     benchmark: prs_path("run_prscs", "benchmark")
     log:     prs_path("run_prscs", "log")
     shell:
@@ -123,11 +172,11 @@ rule run_prscs:
              """
 
 rule combine_weights:
-    input:   lambda w: expand(prs_path("run_prscs", "output"), gwas = w.gwas, chr = CHROMS)
+    input:   lambda w: expand(prs_path("run_prscs", "output", w.nset), gwas = w.gwas, chr = CHROMS)
     output:  prs_path("combine_weights", "output")
-    wildcard_constraints: gwas = "|".join(GWAS)
+    wildcard_constraints: gwas = "|".join(GWAS), nset = "|".join(N_SETS)
     resources: time = "00:10:00"
-    message: "Combine PRS-CS weights across chromosomes for {wildcards.gwas}"
+    message: "Combine PRS-CS weights across chromosomes for {wildcards.gwas} ({wildcards.nset})"
     benchmark: prs_path("combine_weights", "benchmark")
     log:     prs_path("combine_weights", "log")
     shell:
@@ -140,12 +189,12 @@ rule score:
     input:   weights = rules.combine_weights.output,
              pgen    = rules.vcf_to_pgen.output
     output:  prs_path("score", "output")
-    wildcard_constraints: gwas = "|".join(GWAS)
+    wildcard_constraints: gwas = "|".join(GWAS), nset = "|".join(N_SETS)
     params:  pfile  = PRS["vcf_to_pgen"]["prefix"],
-             prefix = prs_path("score", "prefix")
+             prefix = lambda w: prs_path("score", "prefix", w.nset).format(gwas = w.gwas)
     envmodules: "PLINK"
     resources: time = "00:30:00"
-    message: "Score donors on {wildcards.gwas} PRS-CS weights (dosages)"
+    message: "Score donors on {wildcards.gwas} PRS-CS weights ({wildcards.nset}, dosages)"
     benchmark: prs_path("score", "benchmark")
     log:     prs_path("score", "log")
     shell:
@@ -157,27 +206,31 @@ rule score:
              """
 
 rule combine_scores:
-    input:   sscores = expand(prs_path("score", "output"), gwas = GWAS),
+    input:   sscores = lambda w: expand(prs_path("score", "output", w.nset), gwas = nset_gwas(w.nset)),
              pcs     = config["genotypes"]["genotype_pcs"]["output"],
              samples = config["genotypes"]["euro_samples"]["output"],
              sheet   = config["genotypes"]["sample_sheet"]
     output:  scores  = prs_path("combine_scores", "scores"),
              summary = prs_path("combine_scores", "summary")
-    params:  gwas    = GWAS,
+    wildcard_constraints: nset = "|".join(N_SETS)
+    params:  gwas    = lambda w: nset_gwas(w.nset),
              sheet   = config["genotypes"]["euro_samples"]["sheet"],
              id_col  = config["genotypes"]["euro_samples"]["id_col"],
              sex_col = PRS["combine_scores"]["sex_col"],
              pcw_col = PRS["combine_scores"]["pcw_col"]
     singularity: config["containers"]["prs"]
     resources: time = "00:10:00"
-    message: "Combine PGS across GWAS with genotype PCs, sex and PCW"
+    message: "Combine PGS across GWAS with genotype PCs, sex and PCW ({wildcards.nset})"
     benchmark: prs_path("combine_scores", "benchmark")
     log:     prs_path("combine_scores", "log")
     script:  PRS["combine_scores"]["script"]
 
 rule prs_report:
-    input:   scores    = rules.combine_scores.output.scores,
-             summary   = rules.combine_scores.output.summary,
+    input:   scores    = prs_path("combine_scores", "scores", N_PRIMARY),
+             summary   = prs_path("combine_scores", "summary", N_PRIMARY),
+             set_scores = [prs_path("combine_scores", "scores", n) for n in N_SETS],
+             n_gwas    = [PRS["set_n_gwas"]["output"].format(nset = n, gwas = g)
+                          for n in N_SETS for g in nset_gwas(n)],
              qc        = expand(config["prep_gwas"]["format_gwas"]["qc"], gwas = GWAS),
              qc_steps  = expand(config["prep_gwas"]["format_gwas"]["qc_steps"], gwas = GWAS),
              pcs       = config["genotypes"]["genotype_pcs"]["output"],
@@ -188,6 +241,10 @@ rule prs_report:
              n_desc      = ";".join(f"{g}|{n_desc(g)}" for g in GWAS),
              qc          = lambda w, input: ",".join(input.qc),
              qc_steps    = lambda w, input: ",".join(input.qc_steps),
+             n_primary   = N_PRIMARY,
+             set_scores  = ";".join(f"{n}|{prs_path('combine_scores', 'scores', n)}" for n in N_SETS),
+             n_gwas      = ";".join(f"{n}|{g}|{PRS['set_n_gwas']['output'].format(nset = n, gwas = g)}|{n_value_desc(g, n)}"
+                                    for n in N_SETS for g in nset_gwas(n)),
              eigenval    = config["genotypes"]["genotype_pcs"]["prefix"] + ".eigenval",
              id_strip    = PRS["prs_report"]["ancestry_id_strip"],
              flag_donors = ",".join(PRS["prs_report"]["flag_donors"]),
@@ -208,6 +265,9 @@ rule prs_report:
                                summary     = '{input.summary}', \
                                qc          = '{params.qc}', \
                                qc_steps    = '{params.qc_steps}', \
+                               n_primary   = '{params.n_primary}', \
+                               set_scores  = '{params.set_scores}', \
+                               n_gwas      = '{params.n_gwas}', \
                                pcs         = '{input.pcs}', \
                                eigenval    = '{params.eigenval}', \
                                ancestry    = '{input.ancestry}', \

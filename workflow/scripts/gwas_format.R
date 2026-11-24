@@ -73,7 +73,7 @@ delim       <- gwas_cfg[["delim"]]
 effect_type <- gwas_cfg[["effect_type"]]
 trait_type  <- gwas_cfg[["trait_type"]]
 qc_cols     <- unlist(gwas_cfg[["qc_cols"]])
-n_cfg       <- gwas_cfg[["n"]]
+n_cfg       <- gwas_cfg[["n_calc"]]
 
 # QC settings
 filters   <- snakemake@params[["filters"]]
@@ -107,7 +107,7 @@ message("============================")
 tibble(
   variable = c("gwas", "gwas_in", "ref_snpinfo", "bim_file", "sumstats_out", "n_gwas_out",
                "qc_out", "qc_steps_out", "delim", "cols", "effect_type", "trait_type",
-               "qc_cols", "n", "filters", "n_summary"),
+               "qc_cols", "n_calc", "filters", "n_summary"),
   value    = c(gwas, gwas_in, ref_snpinfo, bim_file, sumstats_out, n_gwas_out, qc_out,
                qc_steps_out, delim, paste(names(cols), cols, sep = "=", collapse = ", "),
                effect_type, trait_type, paste(qc_cols, collapse = ", "), n_desc,

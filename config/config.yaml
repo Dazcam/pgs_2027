@@ -23,7 +23,12 @@ containers:
 #     trait_type        binary | continuous (sets the n: auto formula; GenomicSEM factors
 #                       are continuous)
 #     qc_cols           columns that must equal 0 to keep a SNP (GenomicSEM error/warning)
-#     n                 per-SNP N; n_gwas is their summary (prep_gwas: n_summary)
+#   Sample size passed to PRS-CS (--n_gwas); two versions, run side by side (prs: n_sets)
+#     n_st1             N as published in the collaborators' Supplementary Table 1 (total
+#                       cases + controls). Primary: used for the deliverable PGS. GWAS
+#                       without it (adjusted and cortical) use n_calc
+#     n_calc            N calculated from the GWAS file: per-SNP N by the method below,
+#                       summarised after QC (prep_gwas: n_summary). Sensitivity comparison
 #                         column        col x scale
 #                         case_control  4 / (1/cases + 1/controls)
 #                         fixed         value
@@ -41,7 +46,8 @@ gwas:
     effect_type: or
     trait_type: binary
     qc_cols: []
-    n: {method: case_control, cases: Nca, controls: Nco}
+    n_st1: 225534
+    n_calc: {method: case_control, cases: Nca, controls: Nco}
   anx2024:
     url: https://zenodo.org/api/records/13135834/files/ANX_EUR.txt.gz/content
     download: true
@@ -53,7 +59,8 @@ gwas:
     effect_type: beta
     trait_type: continuous
     qc_cols: []
-    n: {method: auto}
+    n_st1: 1096458
+    n_calc: {method: auto}
   asd2019:
     url: https://api.figshare.com/v2/file/download/28169292
     download: true
@@ -65,7 +72,8 @@ gwas:
     effect_type: or
     trait_type: binary
     qc_cols: []
-    n: {method: fixed, value: 44367}   # no N or frequency in file; 18,381 cases, 27,969 controls
+    n_st1: 46350
+    n_calc: {method: fixed, value: 44367}   # no N or frequency in file; 18,381 cases, 27,969 controls
   bip2024:
     url: https://api.figshare.com/v2/file/download/49760772
     download: true
@@ -77,7 +85,8 @@ gwas:
     effect_type: or
     trait_type: binary
     qc_cols: []
-    n: {method: column, col: Neff_half, scale: 2}
+    n_st1: 2954535
+    n_calc: {method: column, col: Neff_half, scale: 2}   # half the cohort-summed effective N
   mdd2025:
     url: https://api.figshare.com/v2/file/download/51487022
     download: true
@@ -89,7 +98,8 @@ gwas:
     effect_type: beta
     trait_type: binary
     qc_cols: []
-    n: {method: column, col: NEFF, scale: 1}
+    n_st1: 5053033
+    n_calc: {method: column, col: NEFF, scale: 1}
   scz2022:
     url: https://api.figshare.com/v2/file/download/34517828
     download: true
@@ -101,7 +111,8 @@ gwas:
     effect_type: beta
     trait_type: binary
     qc_cols: []
-    n: {method: column, col: NEFF, scale: 2}   # NEFF appears to be half the effective N
+    n_st1: 161405
+    n_calc: {method: column, col: NEFF, scale: 2}   # NEFF column holds half the effective N (checked against NCAS/NCON)
   anx2024_adj_adhd2022:
     url: null
     download: false
@@ -113,7 +124,7 @@ gwas:
     effect_type: beta
     trait_type: continuous
     qc_cols: [error, warning]
-    n: {method: column, col: N, scale: 1}
+    n_calc: {method: column, col: N, scale: 1}
   mdd2025_adj_adhd2022:
     url: null
     download: false
@@ -125,7 +136,7 @@ gwas:
     effect_type: beta
     trait_type: continuous
     qc_cols: [error, warning]
-    n: {method: column, col: N, scale: 1}
+    n_calc: {method: column, col: N, scale: 1}
   cortical_expansion:
     url: null
     download: false
@@ -137,7 +148,7 @@ gwas:
     effect_type: beta
     trait_type: continuous
     qc_cols: []
-    n: {method: column, col: N, scale: 1}
+    n_calc: {method: column, col: N, scale: 1}
 
 ##  00SETUP  --------------------------------------------------------------------------
 
@@ -225,12 +236,12 @@ prep_gwas:
       info:       {apply: false, min: 0.8}       # INFO >= min, where the GWAS has an INFO column
       ambiguous:  {apply: false}                 # not strand-ambiguous (A/T, C/G)
       duplicates: {apply: true}                  # unique SNP IDs (PRS-CS keeps the last row of a duplicate)
-      low_n:      {apply: false, min_frac: 0.5}  # N >= min_frac x 90th percentile N (n: column / case_control)
-    n_summary: median        # median | mean of per-SNP N, used as PRS-CS n_gwas
-    auto_maf: [0.1, 0.4]     # MAF window for n: auto
+      low_n:      {apply: false, min_frac: 0.5}  # N >= min_frac x 90th percentile N (n_calc: column / case_control)
+    n_summary: median        # median | mean of per-SNP N, giving n_calc's n_gwas
+    auto_maf: [0.1, 0.4]     # MAF window for n_calc: auto
     script: ../scripts/gwas_format.R
     sumstats: ../results/02PREP-GWAS/{gwas}/{gwas}.prscs.txt
-    n_gwas: ../results/02PREP-GWAS/{gwas}/{gwas}.n_gwas.txt
+    n_gwas: ../results/02PREP-GWAS/{gwas}/{gwas}.n_gwas.txt   # n_gwas from n_calc
     qc: ../results/02PREP-GWAS/{gwas}/{gwas}.qc.tsv
     qc_steps: ../results/02PREP-GWAS/{gwas}/{gwas}.qc_steps.tsv
     benchmark: reports/benchmarks/02prep_gwas.format_gwas_{gwas}.benchmark.txt
@@ -240,7 +251,19 @@ prep_gwas:
 
 # {tag} in a path is filled from the PRS-CS settings, as PRS-CS names its own output:
 # a<a>_b<b>_phi<phi> (e.g. a1_b0.5_phi1e-02, or a1_b0.5_phiauto when phi is null)
+# {nset} is the N set (n_sets below); each set has its own folder of PRS-CS outputs
 prs:
+  # N sets for PRS-CS --n_gwas (see the gwas block: n_st1, n_calc)
+  #   n_st1   Supplementary Table 1 N where given, otherwise n_calc. Primary
+  #   n_calc  N calculated from the GWAS file. Run only for GWAS whose N differs from
+  #           the primary set (here the six public GWAS); the others would repeat the
+  #           primary run exactly (same input and seed)
+  n_sets: [n_st1, n_calc]
+  n_primary: n_st1
+  set_n_gwas:
+    output: ../results/03PRS/{nset}/n_gwas/{gwas}.n_gwas.txt
+    benchmark: reports/benchmarks/03prs.set_n_gwas_{nset}_{gwas}.benchmark.txt
+    log: ../results/00LOG/03PRS/{nset}/set_n_gwas_{gwas}.log
   vcf_to_pgen:
     prefix: ../results/03PRS/genotypes/eqtl_atlas_genotypes.euro.dosage
     output: ../results/03PRS/genotypes/eqtl_atlas_genotypes.euro.dosage.pgen
@@ -255,27 +278,27 @@ prs:
     thin: 5
     seed: 1
     env: ../envs/prscs.yaml
-    out_prefix: ../results/03PRS/prscs/{gwas}/{gwas}
-    output: ../results/03PRS/prscs/{gwas}/{gwas}_pst_eff_{tag}_chr{chr}.txt
-    benchmark: reports/benchmarks/03prs.run_prscs_{gwas}_{tag}_chr{chr}.benchmark.txt
-    log: ../results/00LOG/03PRS/run_prscs_{gwas}_{tag}_chr{chr}.log
+    out_prefix: ../results/03PRS/{nset}/prscs/{gwas}/{gwas}
+    output: ../results/03PRS/{nset}/prscs/{gwas}/{gwas}_pst_eff_{tag}_chr{chr}.txt
+    benchmark: reports/benchmarks/03prs.run_prscs_{nset}_{gwas}_{tag}_chr{chr}.benchmark.txt
+    log: ../results/00LOG/03PRS/{nset}/run_prscs_{gwas}_{tag}_chr{chr}.log
   combine_weights:
-    output: ../results/03PRS/weights/{gwas}_{tag}.weights.txt
-    benchmark: reports/benchmarks/03prs.combine_weights_{gwas}_{tag}.benchmark.txt
-    log: ../results/00LOG/03PRS/combine_weights_{gwas}_{tag}.log
+    output: ../results/03PRS/{nset}/weights/{gwas}_{tag}.weights.txt
+    benchmark: reports/benchmarks/03prs.combine_weights_{nset}_{gwas}_{tag}.benchmark.txt
+    log: ../results/00LOG/03PRS/{nset}/combine_weights_{gwas}_{tag}.log
   score:
-    prefix: ../results/03PRS/scores/{gwas}_{tag}
-    output: ../results/03PRS/scores/{gwas}_{tag}.sscore
-    benchmark: reports/benchmarks/03prs.score_{gwas}_{tag}.benchmark.txt
-    log: ../results/00LOG/03PRS/score_{gwas}_{tag}.log
+    prefix: ../results/03PRS/{nset}/scores/{gwas}_{tag}
+    output: ../results/03PRS/{nset}/scores/{gwas}_{tag}.sscore
+    benchmark: reports/benchmarks/03prs.score_{nset}_{gwas}_{tag}.benchmark.txt
+    log: ../results/00LOG/03PRS/{nset}/score_{gwas}_{tag}.log
   combine_scores:
     sex_col: sex
     pcw_col: PCW
     script: ../scripts/prs_combine_scores.R
-    scores: ../results/03PRS/pgs_scores_{tag}.tsv
-    summary: ../results/03PRS/pgs_summary_{tag}.tsv
-    benchmark: reports/benchmarks/03prs.combine_scores_{tag}.benchmark.txt
-    log: ../results/00LOG/03PRS/combine_scores_{tag}.log
+    scores: ../results/03PRS/{nset}/pgs_scores_{nset}_{tag}.tsv
+    summary: ../results/03PRS/{nset}/pgs_summary_{nset}_{tag}.tsv
+    benchmark: reports/benchmarks/03prs.combine_scores_{nset}_{tag}.benchmark.txt
+    log: ../results/00LOG/03PRS/{nset}/combine_scores_{tag}.log
   prs_report:
     # GenotypeQCtoHRC ancestry inference for all genotyped samples (eQTL study), copied in by hand
     ancestry_inference: ../resources/sheets/ancestry_inference.txt

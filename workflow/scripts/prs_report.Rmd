@@ -10,6 +10,9 @@ params:
   summary: null
   qc: null
   qc_steps: null
+  n_primary: null
+  set_scores: null
+  n_gwas: null
   pcs: null
   eigenval: null
   ancestry: null
@@ -48,6 +51,15 @@ split_pairs <- function(x, names) {
 
 settings <- split_pairs(params$settings, c("group", "setting", "value"))
 n_desc   <- split_pairs(params$n_desc, c("gwas", "n_method"))
+
+# N sets: n_gwas passed to PRS-CS per GWAS and set, and each set's scores
+n_primary <- params$n_primary
+n_gwas    <- split_pairs(params$n_gwas, c("nset", "gwas", "path", "source")) |>
+  mutate(n_gwas = map_dbl(path, \(f) as.numeric(read_lines(f)[1]))) |>
+  select(-path)
+set_scores <- split_pairs(params$set_scores, c("nset", "path")) |>
+  mutate(scores = map(path, \(f) read_tsv(f, show_col_types = FALSE,
+                                          col_types = cols(iid = col_character()))))
 
 # Deliverable table and per-GWAS summary
 scores  <- read_tsv(params$scores, show_col_types = FALSE, col_types = cols(iid = col_character())) |>
@@ -253,7 +265,7 @@ qc_steps |>
 
 ***
 
-Per-SNP N after QC; n_gwas is the value passed to PRS-CS.
+Per-SNP N after QC, calculated from each GWAS file (`n_calc`). Its n_gwas is used by PRS-CS only in the `n_calc` set; the deliverable uses Supplementary Table 1 N where given (see Settings > Per-GWAS N and the n_gwas sensitivity tab).
 
 ```{r qc_n, echo = FALSE, message = FALSE, warning = FALSE}
 qc_long |>
@@ -391,6 +403,82 @@ if (nrow(adj) == 0) {
 
 ***
 
+### n_gwas sensitivity {.tabset}
+
+***
+
+The deliverable PGS use the `n_st1` set: N as published in Supplementary Table 1 where given (total cases + controls), otherwise the N column of the file. The `n_calc` set reruns PRS-CS with N calculated from each GWAS file (effective N for case/control GWAS), for the GWAS where the two differ. Everything else (SNPs, settings, seed) is the same.
+
+#### Agreement
+
+***
+
+```{r n_sens_tbl, echo = FALSE, message = FALSE, warning = FALSE}
+other_sets <- setdiff(set_scores$nset, n_primary)
+primary    <- set_scores$scores[[which(set_scores$nset == n_primary)]]
+
+n_sens <- map(other_sets, \(ns) {
+  other <- set_scores$scores[[which(set_scores$nset == ns)]]
+  tibble(gwas = str_remove(str_subset(colnames(other), "^pgs_(?!raw_)"), "^pgs_")) |>
+    mutate(nset = ns,
+           x = map(gwas, \(g) primary[[paste0("pgs_", g)]][match(other$iid, primary$iid)]),
+           y = map(gwas, \(g) other[[paste0("pgs_", g)]]))
+}) |>
+  list_rbind()
+
+if (nrow(n_sens) == 0) {
+  cat("Only one N set in this run.")
+} else {
+  n_sens |>
+    mutate(pearson  = map2_dbl(x, y, cor),
+           spearman = map2_dbl(x, y, \(a, b) cor(a, b, method = "spearman")),
+           max_diff = map2_dbl(x, y, \(a, b) max(abs(a - b)))) |>
+    select(-x, -y) |>
+    left_join(n_gwas |> filter(nset == n_primary) |> select(gwas, n_primary = n_gwas, src_primary = source),
+              by = "gwas") |>
+    left_join(n_gwas |> select(nset, gwas, n_other = n_gwas, src_other = source), by = c("nset", "gwas")) |>
+    mutate(ratio = n_primary / n_other, gwas = factor(gwas, levels = gwas_ids)) |>
+    arrange(gwas) |>
+    select(gwas, nset, n_primary, src_primary, n_other, src_other, ratio, pearson, spearman, max_diff) |>
+    gt() |>
+    tab_header(title = paste0("PGS from ", n_primary, " against each other N set"),
+               subtitle = "Standardised PGS across donors; max difference in SD units") |>
+    cols_label(gwas = "GWAS", nset = "Compared set", n_primary = paste0("n_gwas (", n_primary, ")"),
+               src_primary = "Source", n_other = "n_gwas (compared)", src_other = "Source",
+               ratio = "Ratio", pearson = "Pearson r", spearman = "Spearman rho",
+               max_diff = "Max |difference|") |>
+    fmt_number(columns = c(n_primary, n_other), decimals = 0) |>
+    fmt_number(columns = ratio, decimals = 2) |>
+    fmt_number(columns = c(pearson, spearman, max_diff), decimals = 3) |>
+    tab_options(table.font.size = px(14), heading.align = "left")
+}
+```
+
+GWAS not listed have the same N in every set (no Supplementary Table 1 value), so they were run once.
+
+***
+
+#### Scatter plots
+
+***
+
+```{r n_sens_plot, echo = FALSE, message = FALSE, warning = FALSE, fig.dim = c(11, 8)}
+if (nrow(n_sens) > 0) {
+  n_sens |>
+    mutate(gwas = factor(gwas, levels = gwas_ids),
+           panel = paste0(gwas, if (length(other_sets) > 1) paste0(" (", nset, ")") else "")) |>
+    unnest(c(x, y)) |>
+    ggplot(aes(x, y)) +
+    geom_abline(slope = 1, intercept = 0, colour = "grey60", linetype = "dashed") +
+    geom_point(colour = "grey30", size = 1.6) +
+    facet_wrap(~ panel, ncol = 3) +
+    labs(x = paste0("Standardised PGS (", n_primary, ")"), y = "Standardised PGS (compared N set)") +
+    theme_classic(base_size = 12)
+}
+```
+
+***
+
 ### Settings {.tabset}
 
 ***
@@ -413,13 +501,16 @@ settings |>
 ***
 
 ```{r settings_n, echo = FALSE, message = FALSE, warning = FALSE}
-n_desc |>
+n_gwas |>
+  filter(nset == n_primary) |>
+  select(gwas, n_gwas, source) |>
   left_join(summary |> select(gwas, snps_used), by = "gwas") |>
-  left_join(qc_long |> filter(type == "n", name == "n_gwas") |> transmute(gwas = as.character(gwas), n_gwas = value),
-            by = "gwas") |>
+  mutate(gwas = factor(gwas, levels = gwas_ids)) |>
+  arrange(gwas) |>
   gt() |>
-  tab_header(title = "Per-GWAS N and SNPs used") |>
-  cols_label(gwas = "GWAS", n_method = "Per-SNP N", n_gwas = "n_gwas (PRS-CS)", snps_used = "SNPs in score") |>
+  tab_header(title = "Per-GWAS N and SNPs used in the deliverable PGS",
+             subtitle = paste0("N set: ", n_primary)) |>
+  cols_label(gwas = "GWAS", n_gwas = "n_gwas (PRS-CS)", source = "Source", snps_used = "SNPs in score") |>
   fmt_number(columns = c(n_gwas, snps_used), decimals = 0) |>
   tab_options(table.font.size = px(14), heading.align = "left")
 ```
@@ -436,13 +527,15 @@ n_desc |>
 # Rules in this workflow, longest first so e.g. get_prscs_ref is not read as get_prscs
 rules <- c("get_containers", "get_prscs", "get_prscs_ref", "get_gwas_sumstats",
            "euro_samples", "subset_vcf", "vcf_to_plink", "ld_prune", "genotype_pcs",
-           "format_gwas", "vcf_to_pgen", "run_prscs", "combine_weights", "score",
-           "combine_scores", "prs_report")
+           "format_gwas", "vcf_to_pgen", "set_n_gwas", "run_prscs", "combine_weights",
+           "score", "combine_scores", "prs_report")
 rules <- rules[order(-nchar(rules))]
 
 files <- list.files(bmark_dir, pattern = "^0[0-3][a-z_]+\\..*\\.benchmark\\.txt$", full.names = TRUE)
 
 gwas_re <- paste0("^_(", paste(gwas_ids[order(-nchar(gwas_ids))], collapse = "|"), ")(_|$)")
+nset_re <- paste0("^_(", paste(set_scores$nset, collapse = "|"), ")(?=_|$)")
+nset_rules <- c("set_n_gwas", "run_prscs", "combine_weights", "score", "combine_scores")
 
 benchmarks <- map(files, function(f) {
   df    <- read.table(f, header = TRUE, sep = "\t")
@@ -451,14 +544,18 @@ benchmarks <- map(files, function(f) {
   name  <- str_remove(stem, "^[^.]+\\.")
   rule  <- str_extract(name, paste0("^(", paste(rules, collapse = "|"), ")"))
   rest  <- str_remove(name, paste0("^", rule))
-  tibble(pipeline = pipe, rule = rule, rest = rest,
+  nset  <- str_match(rest, nset_re)[, 2]
+  rest  <- str_remove(rest, nset_re)
+  tibble(pipeline = pipe, rule = rule, nset = nset, rest = rest,
          runtime_sec = df$s, max_rss = df$max_rss)
 }) |>
   list_rbind()
 
 # Keep only current GWAS and the current PRS-CS tag, so old runs drop out
+# Rules run per N set must have one in the name (drops runs from before N sets)
 benchmarks <- benchmarks |>
   filter(!is.na(rule),
+         !rule %in% nset_rules | !is.na(nset),
          rest == "" | str_detect(rest, gwas_re) | str_detect(rest, "^_a\\d+_b"),
          !str_detect(rest, "_a\\d+_b") | str_detect(rest, fixed(tag)))
 

@@ -14,5 +14,5 @@ rule all:
         config["genotypes"]["vcf_to_plink"]["output"],
         config["genotypes"]["genotype_pcs"]["output"],
         expand(config["prep_gwas"]["format_gwas"]["sumstats"], gwas = GWAS),
-        prs_path("combine_scores", "scores"),
+        [prs_path("combine_scores", "scores", n) for n in N_SETS],
         prs_path("prs_report", "html")
