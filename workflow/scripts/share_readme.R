@@ -19,6 +19,7 @@
 #            counts   shared pseudobulk files, in config cell type order
 #            summary  03PRS pgs_summary for the primary N set (snps_used per GWAS)
 #            n_gwas   n_gwas passed to PRS-CS per GWAS (primary N set, GWAS order)
+#            qc       format_gwas per-SNP N summary per GWAS (GWAS order)
 #
 # Outputs:   readme   README.txt
 #
@@ -48,6 +49,7 @@ scores_in  <- snakemake@input[["scores"]]
 counts_in  <- unlist(snakemake@input[["counts"]])
 summary_in <- snakemake@input[["summary"]]
 n_gwas_in  <- unlist(snakemake@input[["n_gwas"]])
+qc_in      <- unlist(snakemake@input[["qc"]])
 readme_out <- snakemake@output[["readme"]]
 
 # Settings
@@ -60,6 +62,7 @@ prscs       <- snakemake@params[["prscs"]]
 ld_ref      <- snakemake@params[["ld_reference"]]
 pca         <- snakemake@params[["pca"]]
 sex_values  <- unlist(snakemake@params[["sex_values"]])
+n_summary   <- snakemake@params[["n_summary"]]
 title       <- snakemake@params[["title"]]
 code        <- snakemake@params[["code"]]
 
@@ -118,8 +121,20 @@ pcw      <- format(range(scores$PCW), trim = TRUE)
 prune    <- str_split_1(str_squish(pca$indep_pairwise), " ")
 
 summary_tbl <- read_tsv(summary_in, show_col_types = FALSE)
+
+# Per-SNP N range after QC: an N column that varies between SNPs was summarised
+# (prep_gwas: n_summary) to the single value PRS-CS takes
+n_varies <- map_lgl(qc_in, \(f) {
+  n <- read_tsv(f, show_col_types = FALSE) |> filter(type == "n")
+  n$value[n$name == "n_min"] != n$value[n$name == "n_max"]
+})
+
 gwas_tbl <- tibble(gwas = gwas_ids, file = gwas_files[gwas_ids], source = n_sources[gwas_ids],
-                   n_gwas = map_dbl(n_gwas_in, \(f) as.numeric(read_lines(f)[1]))) |>
+                   n_gwas = map_dbl(n_gwas_in, \(f) as.numeric(read_lines(f)[1])),
+                   varies = n_varies) |>
+  mutate(source = if_else(source == "N column in file" & varies,
+                          paste(n_summary, "of per-SNP N in file"), source)) |>
+  select(-varies) |>
   left_join(summary_tbl |> select(gwas, snps_used), by = "gwas")
 if (anyNA(gwas_tbl)) stop("Missing values in the GWAS table")
 
@@ -171,6 +186,9 @@ readme <- c(
          " donors: (score - mean) / SD"),
   "",
   table_lines,
+  "",
+  "  n_gwas: the single GWAS sample size passed to PRS-CS (--n_gwas); Supplementary Table 1 N is the",
+  "  total sample size as published (cases + controls for case/control GWAS)",
   "",
   paste0("Code available at ", code))
 

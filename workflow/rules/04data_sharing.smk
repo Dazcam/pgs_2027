@@ -25,7 +25,8 @@ def allowed_missing(cell_type):
     return [str(d) for d, types in donors.items() if cell_type in types]
 
 def readme_n_source(gwas):
-    # Where the primary N set's n_gwas comes from, as worded in the README
+    # Where the primary N set's n_gwas comes from, as worded in the README. For an N
+    # column, share_readme adds whether it is constant or summarised (per-SNP N range)
     if n_source(gwas, N_PRIMARY) == "n_st1":
         return "Supplementary Table 1"
     if config["gwas"][gwas]["n_calc"]["method"] == "column":
@@ -68,7 +69,8 @@ rule share_readme:
     input:   scores  = DS["share_scores"]["output"],
              counts  = SHARE_COUNTS,
              summary = prs_path("combine_scores", "summary", N_PRIMARY),
-             n_gwas  = [PRS["set_n_gwas"]["output"].format(nset = N_PRIMARY, gwas = g) for g in GWAS]
+             n_gwas  = [PRS["set_n_gwas"]["output"].format(nset = N_PRIMARY, gwas = g) for g in GWAS],
+             qc      = expand(config["prep_gwas"]["format_gwas"]["qc"], gwas = GWAS)   # per-SNP N range
     output:  readme  = DS["share_readme"]["output"]
     params:  labels       = list(SHARE_CELL_TYPES),
              allowed_missing = {lab: allowed_missing(ct) for lab, ct in SHARE_CELL_TYPES.items()},
@@ -81,6 +83,7 @@ rule share_readme:
                              "maf":            config["genotypes"]["ld_prune"]["maf"],
                              "indep_pairwise": config["genotypes"]["ld_prune"]["indep_pairwise"]},
              sex_values   = DS["share_scores"]["sex_values"],
+             n_summary    = config["prep_gwas"]["format_gwas"]["n_summary"],
              title        = lambda w: DS["share_readme"]["title"],   # function: {n_donors} is filled in the script
              code         = DS["share_readme"]["code"]
     singularity: config["containers"]["prs"]
