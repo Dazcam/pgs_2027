@@ -14,5 +14,6 @@ script_dir <- get_script_dir()
 
 source(file.path(script_dir, "..", "scripts", "gwas_functions.R"))
 source(file.path(script_dir, "..", "scripts", "prs_functions.R"))
+source(file.path(script_dir, "..", "scripts", "share_functions.R"))
 
 test_dir(script_dir, reporter = "summary")

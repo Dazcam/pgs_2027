@@ -5,7 +5,7 @@ use-conda: True
 use-envmodules: True
 conda-frontend: conda
 use-singularity: True
-singularity-args: "--bind /shared/scratch/SCWF00021/pgs_2027 --bind /shared/apps/ --pwd /shared/scratch/SCWF00021/pgs_2027/workflow"
+singularity-args: "--bind /shared/scratch/SCWF00021/pgs_2027 --bind /shared/scratch/SCWF00021/eQTL_study_2025/results/02SCANPY/pseudobulk --bind /shared/apps/ --pwd /shared/scratch/SCWF00021/pgs_2027/workflow"
 keep-going: True
 jobs: 90
 rerun-incomplete: True

@@ -310,5 +310,53 @@ prs:
     benchmark: reports/benchmarks/03prs.prs_report_{tag}.benchmark.txt
     log: ../results/00LOG/03PRS/prs_report_{tag}.log
 
+##  04DATA-SHARING  -------------------------------------------------------------------
+
+# Files shared with the collaborators, packed in one tarball: the PGS file for the
+# primary N set (prs: n_primary), pseudobulk counts per cell type from the eQTL
+# pipeline, and a README written from this config and the run's outputs
+data_sharing:
+  dir: ../results/04DATA-SHARING/share        # contents of the tarball
+  # Scanpy pseudobulk counts (donors x genes), from the eQTL pipeline; outside this
+  # project, so its folder must also be bound in the profile's singularity-args
+  pseudobulk_csv: ../../eQTL_study_2025/results/02SCANPY/pseudobulk/{cell_type}_pseudobulk.csv
+  # Cell types shared (L1, then L2 subclusters; pseudotime bins excluded), and the
+  # names used in the shared files, applied as text substitutions in order
+  cell_types: [Glu-UL, Glu-DL, GABA, NPC, OPC, MG, Endo-Peri,
+               Glu-UL-0, Glu-UL-1, Glu-UL-2, Glu-DL-0, Glu-DL-1, Glu-DL-2,
+               GABA-0, GABA-1, GABA-2, NPC-0, NPC-1, NPC-2]
+  cell_type_labels: {"Glu-UL": "Glu-A", "Glu-DL": "Glu-B"}
+  # PGS donors that failed QC for a cell type and so are absent from its pseudobulk
+  # (pipeline cell type names); any other missing donor stops the pipeline
+  allowed_missing:
+    "15183": [Glu-DL-1, NPC-0, NPC-2]
+  share_scores:
+    sex_values: [M, F]                         # every donor must have one of these
+    script: ../scripts/share_scores.R
+    output: ../results/04DATA-SHARING/share/pgs_scores.tsv
+    benchmark: reports/benchmarks/04data_sharing.share_scores.benchmark.txt
+    log: ../results/00LOG/04DATA-SHARING/share_scores.log
+  share_pseudobulk:
+    script: ../scripts/share_pseudobulk.R
+    output: ../results/04DATA-SHARING/share/pseudobulk/{label}.tsv.gz
+    benchmark: reports/benchmarks/04data_sharing.share_pseudobulk_{label}.benchmark.txt
+    log: ../results/00LOG/04DATA-SHARING/share_pseudobulk_{label}.log
+  share_readme:
+    title: "Polygenic scores and pseudobulk expression: {n_donors} fetal brain donors of European ancestry"
+    ld_reference: UK Biobank European (ldblk_ukbb_eur), HapMap3 SNPs
+    pca_software: PLINK v1.9.0-b.8                 # version that ran genotype_pcs
+    code: Dazcam/pgs_2027
+    script: ../scripts/share_readme.R
+    output: ../results/04DATA-SHARING/share/README.txt
+    benchmark: reports/benchmarks/04data_sharing.share_readme.benchmark.txt
+    log: ../results/00LOG/04DATA-SHARING/share_readme.log
+  share_tar:
+    top_dir: pgs_2027_shared_data              # top folder inside the tarball
+    md5sums: ../results/04DATA-SHARING/share/md5sums.txt          # packed in the tarball
+    output: ../results/04DATA-SHARING/pgs_2027_shared_data.tar.gz
+    md5: ../results/04DATA-SHARING/pgs_2027_shared_data.tar.gz.md5  # for checking the download
+    benchmark: reports/benchmarks/04data_sharing.share_tar.benchmark.txt
+    log: ../results/00LOG/04DATA-SHARING/share_tar.log
+
 #--------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------

@@ -4,6 +4,7 @@ include: 'rules/00setup.smk'
 include: 'rules/01genotypes.smk'
 include: 'rules/02prep_gwas.smk'
 include: 'rules/03prs.smk'
+include: 'rules/04data_sharing.smk'
 
 rule all:
     input:
@@ -15,4 +16,5 @@ rule all:
         config["genotypes"]["genotype_pcs"]["output"],
         expand(config["prep_gwas"]["format_gwas"]["sumstats"], gwas = GWAS),
         [prs_path("combine_scores", "scores", n) for n in N_SETS],
-        prs_path("prs_report", "html")
+        prs_path("prs_report", "html"),
+        config["data_sharing"]["share_tar"]["output"]
