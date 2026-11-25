@@ -8,32 +8,7 @@
 
 containers:
   prs: ../resources/containers/prs.sif
-
-# GWAS summary statistics, stored as ../resources/gwas/<gwas>/<file>
-#   Source (00SETUP)
-#     download: true    fetched from url
-#     download: false   copied in by hand (collaborator files have no url)
-#     token: true       send the Figshare API token (figshare blocks downloads without it)
-#     md5               optional; quote it so YAML keeps it as a string
-#   Format (02PREP-GWAS)
-#     delim             tab | space
-#     cols              raw column names for snp, a1 (effect allele), a2, effect, se, p,
-#                       freq (allele frequency, used by n: auto) and info (null if absent)
-#     effect_type       beta | or (or is converted to log(OR))
-#     trait_type        binary | continuous (sets the n: auto formula; GenomicSEM factors
-#                       are continuous)
-#     qc_cols           columns that must equal 0 to keep a SNP (GenomicSEM error/warning)
-#   Sample size passed to PRS-CS (--n_gwas); two versions, run side by side (prs: n_sets)
-#     n_st1             N as published in the collaborators' Supplementary Table 1 (total
-#                       cases + controls). Primary: used for the deliverable PGS. GWAS
-#                       without it (adjusted and cortical) use n_calc
-#     n_calc            N calculated from the GWAS file: per-SNP N by the method below,
-#                       summarised after QC (prep_gwas: n_summary). Sensitivity comparison
-#                         column        col x scale
-#                         case_control  4 / (1/cases + 1/controls)
-#                         fixed         value
-#                         auto          Mallard et al.: k / (2f(1-f)SE^2), k = 4 binary,
-#                                       1 continuous, SNPs with MAF in prep_gwas: auto_maf
+  
 gwas:
   adhd2022:
     url: https://api.figshare.com/v2/file/download/40036684
@@ -185,7 +160,6 @@ setup:
 ##  01GENOTYPES  ----------------------------------------------------------------------
 
 genotypes:
-  # Final eQTL atlas genotypes (134 QC'd samples), copied in by hand
   vcf: ../resources/genotypes/eqtl_atlas_genotypes.vcf.gz
   vcf_md5: "6e6b663b7d386e00078567ac78440178"
   sample_sheet: ../resources/sheets/eQTL_study_2025_sample_anns.xlsx
@@ -225,20 +199,15 @@ genotypes:
 
 prep_gwas:
   format_gwas:
-    # GWAS QC filters (applied to every GWAS). Each filter is always counted, in the
-    # whole file and among the SNPs PRS-CS would use (rsID with compatible alleles in
-    # the LD reference and the genotype .bim); apply: true removes the failing SNPs.
-    # Off by default: the collaborators' GWAS are already QCed. Rows with a missing
-    # or invalid SNP, BETA, SE or P are always removed
     filters:
-      snv:        {apply: false}                 # biallelic single-base SNVs (PRS-CS drops others itself)
-      qc_cols:    {apply: false}                 # per-GWAS qc_cols == 0 (GenomicSEM error/warning)
-      info:       {apply: false, min: 0.8}       # INFO >= min, where the GWAS has an INFO column
-      ambiguous:  {apply: false}                 # not strand-ambiguous (A/T, C/G)
-      duplicates: {apply: true}                  # unique SNP IDs (PRS-CS keeps the last row of a duplicate)
-      low_n:      {apply: false, min_frac: 0.5}  # N >= min_frac x 90th percentile N (n_calc: column / case_control)
-    n_summary: median        # median | mean of per-SNP N, giving n_calc's n_gwas
-    auto_maf: [0.1, 0.4]     # MAF window for n_calc: auto
+      snv:        {apply: false}
+      qc_cols:    {apply: false}
+      info:       {apply: false, min: 0.8}
+      ambiguous:  {apply: false}
+      duplicates: {apply: true}
+      low_n:      {apply: false, min_frac: 0.5}
+    n_summary: median
+    auto_maf: [0.1, 0.4]
     script: ../scripts/gwas_format.R
     sumstats: ../results/02PREP-GWAS/{gwas}/{gwas}.prscs.txt
     n_gwas: ../results/02PREP-GWAS/{gwas}/{gwas}.n_gwas.txt   # n_gwas from n_calc
@@ -249,15 +218,7 @@ prep_gwas:
 
 ##  03PRS  ----------------------------------------------------------------------------
 
-# {tag} in a path is filled from the PRS-CS settings, as PRS-CS names its own output:
-# a<a>_b<b>_phi<phi> (e.g. a1_b0.5_phi1e-02, or a1_b0.5_phiauto when phi is null)
-# {nset} is the N set (n_sets below); each set has its own folder of PRS-CS outputs
 prs:
-  # N sets for PRS-CS --n_gwas (see the gwas block: n_st1, n_calc)
-  #   n_st1   Supplementary Table 1 N where given, otherwise n_calc. Primary
-  #   n_calc  N calculated from the GWAS file. Run only for GWAS whose N differs from
-  #           the primary set (here the six public GWAS); the others would repeat the
-  #           primary run exactly (same input and seed)
   n_sets: [n_st1, n_calc]
   n_primary: n_st1
   set_n_gwas:
@@ -300,10 +261,9 @@ prs:
     benchmark: reports/benchmarks/03prs.combine_scores_{nset}_{tag}.benchmark.txt
     log: ../results/00LOG/03PRS/{nset}/combine_scores_{tag}.log
   prs_report:
-    # GenotypeQCtoHRC ancestry inference for all genotyped samples (eQTL study), copied in by hand
-    ancestry_inference: ../resources/sheets/ancestry_inference.txt
+    ancestry_inference: ../resources/sheets/ancestry_inference.txt # GenotypeQCtoHRC ancestry inference for all genotyped samples (eQTL study)
     ancestry_id_strip: "_FC$"        # regex removed from its IDs to match the sample sheet
-    flag_donors: ["2143", "15821", "14404"]   # donors driving genotype PC1
+    flag_donors: ["2143", "15821", "14404"]
     rmd: scripts/prs_report.Rmd
     html: reports/03PRS/03prs_report_{tag}.html
     bmark_dir: reports/benchmarks
@@ -311,27 +271,17 @@ prs:
     log: ../results/00LOG/03PRS/prs_report_{tag}.log
 
 ##  04DATA-SHARING  -------------------------------------------------------------------
-
-# Files shared with the collaborators, packed in one tarball: the PGS file for the
-# primary N set (prs: n_primary), pseudobulk counts per cell type from the eQTL
-# pipeline, and a README written from this config and the run's outputs
 data_sharing:
-  dir: ../results/04DATA-SHARING/share        # contents of the tarball
-  # Scanpy pseudobulk counts (donors x genes), from the eQTL pipeline; outside this
-  # project, so its folder must also be bound in the profile's singularity-args
+  dir: ../results/04DATA-SHARING/share
   pseudobulk_csv: ../../eQTL_study_2025/results/02SCANPY/pseudobulk/{cell_type}_pseudobulk.csv
-  # Cell types shared (L1, then L2 subclusters; pseudotime bins excluded), and the
-  # names used in the shared files, applied as text substitutions in order
   cell_types: [Glu-UL, Glu-DL, GABA, NPC, OPC, MG, Endo-Peri,
                Glu-UL-0, Glu-UL-1, Glu-UL-2, Glu-DL-0, Glu-DL-1, Glu-DL-2,
                GABA-0, GABA-1, GABA-2, NPC-0, NPC-1, NPC-2]
   cell_type_labels: {"Glu-UL": "Glu-A", "Glu-DL": "Glu-B"}
-  # PGS donors that failed QC for a cell type and so are absent from its pseudobulk
-  # (pipeline cell type names); any other missing donor stops the pipeline
   allowed_missing:
-    "15183": [Glu-DL-1, NPC-0, NPC-2]
+    "15183": [Glu-DL-1, NPC-0, NPC-2]          # Failed GeX QC
   share_scores:
-    sex_values: [M, F]                         # every donor must have one of these
+    sex_values: [M, F]                         
     script: ../scripts/share_scores.R
     output: ../results/04DATA-SHARING/share/pgs_scores.tsv
     benchmark: reports/benchmarks/04data_sharing.share_scores.benchmark.txt
