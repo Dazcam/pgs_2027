@@ -65,14 +65,38 @@ rule share_pseudobulk:
     log:     DS["share_pseudobulk"]["log"]
     script:  DS["share_pseudobulk"]["script"]
 
+NUC = DS["share_nuclei_counts"]
+
+rule share_nuclei_counts:
+    input:   l1     = NUC["l1_h5ad"],
+             l2     = [NUC["l2_h5ad"].format(l1_pop = t) for t in NUC["l2_types"]],
+             scores = DS["share_scores"]["output"]
+    output:  h5ad    = NUC["output"],
+             summary = NUC["summary"]
+    params:  l2_types     = NUC["l2_types"],
+             cluster_col  = NUC["cluster_col"],
+             cluster_anns = NUC["cluster_anns"],
+             sample_col   = NUC["sample_col"],
+             sex_col      = NUC["sex_col"],
+             counts_layer = NUC["counts_layer"],
+             labels       = DS["cell_type_labels"]
+    conda:   NUC["env"]
+    resources: mem_mb = 64000, time = "03:00:00"
+    message: "Nucleus-level raw counts with L1/L2 cell types for the PGS donors"
+    benchmark: NUC["benchmark"]
+    log:     NUC["log"]
+    script:  NUC["script"]
+
 rule share_readme:
     input:   scores  = DS["share_scores"]["output"],
              counts  = SHARE_COUNTS,
              summary = prs_path("combine_scores", "summary", N_PRIMARY),
              n_gwas  = [PRS["set_n_gwas"]["output"].format(nset = N_PRIMARY, gwas = g) for g in GWAS],
-             qc      = expand(config["prep_gwas"]["format_gwas"]["qc"], gwas = GWAS)   # per-SNP N range
+             qc      = expand(config["prep_gwas"]["format_gwas"]["qc"], gwas = GWAS),   # per-SNP N range
+             nuclei  = NUC["summary"]
     output:  readme  = DS["share_readme"]["output"]
     params:  labels       = list(SHARE_CELL_TYPES),
+             l2_types     = [share_label(t) for t in NUC["l2_types"]],
              allowed_missing = {lab: allowed_missing(ct) for lab, ct in SHARE_CELL_TYPES.items()},
              gwas         = GWAS,
              gwas_files   = {g: config["gwas"][g]["file"] for g in GWAS},
@@ -96,15 +120,16 @@ rule share_readme:
 rule share_tar:
     input:   readme = DS["share_readme"]["output"],
              scores = DS["share_scores"]["output"],
-             counts = SHARE_COUNTS
+             counts = SHARE_COUNTS,
+             nuclei = NUC["output"]
     output:  tar     = DS["share_tar"]["output"],
              md5     = DS["share_tar"]["md5"],
              md5sums = DS["share_tar"]["md5sums"]
     params:  parent  = os.path.dirname(os.path.normpath(DS["dir"])),
              src     = os.path.basename(os.path.normpath(DS["dir"])),
              top_dir = DS["share_tar"]["top_dir"],
-             n_files = len(SHARE_COUNTS) + 3   # pseudobulk files, PGS, README, md5sums
-    resources: time = "00:30:00"
+             n_files = len(SHARE_COUNTS) + 4   # pseudobulk files, PGS, nuclei counts, README, md5sums
+    resources: mem_mb = 8000, time = "02:00:00"
     message: "Pack the shared files into one tarball and check it"
     benchmark: DS["share_tar"]["benchmark"]
     log:     DS["share_tar"]["log"]

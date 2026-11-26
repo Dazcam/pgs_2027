@@ -291,20 +291,36 @@ data_sharing:
     output: ../results/04DATA-SHARING/share/pseudobulk/{label}.tsv.gz
     benchmark: reports/benchmarks/04data_sharing.share_pseudobulk_{label}.benchmark.txt
     log: ../results/00LOG/04DATA-SHARING/share_pseudobulk_{label}.log
+  share_nuclei_counts:
+    l1_h5ad: ../../eQTL_study_2025/results/02SCANPY/adata_clusters_v3.h5ad
+    l2_h5ad: ../../eQTL_study_2025/results/02SCANPY/subclustering/adata_{l1_pop}_subclusters.h5ad
+    l2_types: [Glu-UL, Glu-DL, GABA, NPC]         # L1 types with an L2 object
+    cluster_col: leiden_harmony_0.2               # L1 clusters; cell types via cluster_anns
+    cluster_anns: {"0": Glu-UL, "1": Glu-DL, "2": NPC, "3": Glu-UL, "4": GABA,
+                   "5": GABA, "6": Endo-Peri, "7": OPC, "8": MG, "9": NPC}   # as eQTL scanpy_gene_lists.py
+    sample_col: sample
+    sex_col: sex_final                             # checked against the PGS file's sex
+    counts_layer: counts
+    env: /scratch/SCWF00021/eQTL_study_2025/workflow/.snakemake/conda/0cb681be978257cc9d6bd0de7bfee4e7_
+    script: ../scripts/share_nuclei_counts.py
+    output: ../results/04DATA-SHARING/share/nuclei_counts.h5ad
+    summary: ../results/04DATA-SHARING/nuclei_counts_summary.tsv
+    benchmark: reports/benchmarks/04data_sharing.share_nuclei_counts.benchmark.txt
+    log: ../results/00LOG/04DATA-SHARING/share_nuclei_counts.log
   share_readme:
     title: "Polygenic scores and pseudobulk expression: {n_donors} fetal brain donors of European ancestry"
     ld_reference: UK Biobank European (ldblk_ukbb_eur), HapMap3 SNPs
-    pca_software: PLINK v1.9.0-b.8                 # version that ran genotype_pcs
+    pca_software: PLINK v1.9.0-b.8                                # version that ran genotype_pcs
     code: Dazcam/pgs_2027
     script: ../scripts/share_readme.R
     output: ../results/04DATA-SHARING/share/README.txt
     benchmark: reports/benchmarks/04data_sharing.share_readme.benchmark.txt
     log: ../results/00LOG/04DATA-SHARING/share_readme.log
   share_tar:
-    top_dir: pgs_2027_shared_data              # top folder inside the tarball
+    top_dir: pgs_2027_shared_data            
     md5sums: ../results/04DATA-SHARING/share/md5sums.txt          # packed in the tarball
     output: ../results/04DATA-SHARING/pgs_2027_shared_data.tar.gz
-    md5: ../results/04DATA-SHARING/pgs_2027_shared_data.tar.gz.md5  # for checking the download
+    md5: ../results/04DATA-SHARING/pgs_2027_shared_data.tar.gz.md5  
     benchmark: reports/benchmarks/04data_sharing.share_tar.benchmark.txt
     log: ../results/00LOG/04DATA-SHARING/share_tar.log
 

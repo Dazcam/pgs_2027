@@ -20,6 +20,7 @@
 #            summary  03PRS pgs_summary for the primary N set (snps_used per GWAS)
 #            n_gwas   n_gwas passed to PRS-CS per GWAS (primary N set, GWAS order)
 #            qc       format_gwas per-SNP N summary per GWAS (GWAS order)
+#            nuclei   share_nuclei_counts summary (nuclei per L1 and L2 cell type)
 #
 # Outputs:   readme   README.txt
 #
@@ -50,10 +51,12 @@ counts_in  <- unlist(snakemake@input[["counts"]])
 summary_in <- snakemake@input[["summary"]]
 n_gwas_in  <- unlist(snakemake@input[["n_gwas"]])
 qc_in      <- unlist(snakemake@input[["qc"]])
+nuclei_in  <- snakemake@input[["nuclei"]]
 readme_out <- snakemake@output[["readme"]]
 
 # Settings
 labels      <- unlist(snakemake@params[["labels"]])
+l2_types    <- unlist(snakemake@params[["l2_types"]])    # L1 types with L2 subclusters
 allowed     <- snakemake@params[["allowed_missing"]]     # per label: donors allowed to be absent
 gwas_ids    <- unlist(snakemake@params[["gwas"]])
 gwas_files  <- unlist(snakemake@params[["gwas_files"]])
@@ -101,16 +104,20 @@ message("All ", length(counts_in), " pseudobulk files have the PGS donors in the
 
 # README sentence on donors: absences listed per donor
 donor_lines <- if (nrow(absent) == 0) {
-  paste0("All files contain the same ", n_donors, " donors in the same order.")
+  c(paste0("pgs_scores.tsv and the pseudobulk files contain the same ", n_donors,
+           " donors in the same order; nuclei_counts.h5ad"),
+    "contains all nuclei from these donors.")
 } else {
-  c(paste0("All files contain the same ", n_donors, " donors in the same order, except that these donors"),
-    "failed QC for some cell types and are absent from those files:",
+  c(paste0("pgs_scores.tsv and the pseudobulk files contain the same ", n_donors,
+           " donors in the same order, except"),
+    "that these donors failed QC for some cell types and are absent from those pseudobulk files:",
     absent |>
       mutate(label = factor(label, levels = labels)) |>
       arrange(label) |>
       summarise(types = paste(label, collapse = ", "), .by = iid) |>
       transmute(line = paste0("  ", iid, ": ", types)) |>
-      pull(line))
+      pull(line),
+    "nuclei_counts.h5ad contains all nuclei from these donors.")
 }
 
 ##  Values for the README  ------------------------------------------------------------
@@ -139,6 +146,24 @@ gwas_tbl <- tibble(gwas = gwas_ids, file = gwas_files[gwas_ids], source = n_sour
 if (anyNA(gwas_tbl)) stop("Missing values in the GWAS table")
 
 fmt_n <- \(x) format(x, big.mark = ",", trim = TRUE, scientific = FALSE)
+
+# Nuclei file: counts, and L2 subclusters without a pseudobulk file
+nuclei   <- read_tsv(nuclei_in, show_col_types = FALSE, col_types = cols(nuclei = col_double()))
+n_nuclei <- nuclei$nuclei[nuclei$level == "all" & nuclei$cell_type == "nuclei"]
+n_genes  <- nuclei$nuclei[nuclei$level == "all" & nuclei$cell_type == "genes"]
+l1_all   <- nuclei$cell_type[nuclei$level == "L1"]
+l2_all   <- nuclei$cell_type[nuclei$level == "L2"]
+l1_all   <- c(intersect(labels, l1_all), sort(setdiff(l1_all, labels)))   # pseudobulk order first
+l2_extra <- setdiff(l2_all, labels)
+l1_no_l2 <- setdiff(l1_all, l2_types)
+paste_and <- \(x) if (length(x) <= 1) x else paste(paste(head(x, -1), collapse = ", "), "and", tail(x, 1))
+nuclei_lines <- c(
+  "Nucleus annotation (nuclei_counts.h5ad)",
+  paste0("  cell_type_l1  ", paste(l1_all, collapse = ", ")),
+  paste0("  cell_type_l2  subclusters of ", paste_and(l2_types), "; empty for ", paste_and(l1_no_l2)),
+  if (length(l2_extra) > 0) {
+    paste0("                ", paste_and(l2_extra), " are included but have no pseudobulk file")
+  })
 cols  <- list(c("GWAS", gwas_tbl$gwas), c("File", gwas_tbl$file),
               c("n_gwas", fmt_n(gwas_tbl$n_gwas)), c("n_gwas source", gwas_tbl$source),
               c("SNPs in score", fmt_n(gwas_tbl$snps_used)))
@@ -159,13 +184,19 @@ readme <- c(
   paste0("                             Raw pseudobulk counts, one file per cell type (",
          length(labels), "); one row per donor"),
   "                             (iid), one column per gene (mixed encoding, gene symbols or Ensembl IDs, as output by Scanpy)",
+  "  nuclei_counts.h5ad         Raw counts per nucleus (AnnData; sparse matrix in X):",
+  paste0("                             ", fmt_n(n_nuclei), " nuclei x ", fmt_n(n_genes),
+         " genes (gene IDs as in the pseudobulk files);"),
+  "                             obs: iid, cell_type_l1, cell_type_l2, PCW, sex; index: cell_id",
   "  README.txt                 This file",
   "  md5sums.txt                MD5 checksums of the files above; check with: md5sum -c md5sums.txt",
   "",
   donor_lines,
   "",
-  "Cell types",
+  "Cell types (pseudobulk files)",
   share_cell_type_lines(labels),
+  "",
+  nuclei_lines,
   "",
   "Covariates",
   paste0("  sex           ", paste(sex_n, collapse = " or ")),
